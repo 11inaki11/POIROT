@@ -54,6 +54,7 @@ def run_poirot(
     # ── Optional — message context ─────────────────────────────────────────
     include_tool_calls: bool = False,
     include_broadcast_messages: bool = False,
+    full_context: bool = False,
     # ── Optional — context window ──────────────────────────────────────────
     ollama_num_ctx: int = 131_072,
     token_budget: int = 95_000,
@@ -79,6 +80,10 @@ def run_poirot(
         ignore_list: Component names to exclude from error vector analysis.
         include_tool_calls: Include tool call messages in agent context windows.
         include_broadcast_messages: Include broadcast messages (sent to all agents).
+        full_context: If True, each agent receives all messages from all agents in
+            the session, not just the ones they sent or received. Messages from other
+            agents are presented as HumanMessage with a "From [agent_id]:" header.
+            Warning: enabling this can cause context overflow in long sessions.
         ollama_num_ctx: Context window size for Ollama models (tokens).
         token_budget: Maximum tokens for agent context windows in Phase 2.
         max_agent_messages: Maximum LLM calls per agent in Phase 2.
@@ -120,6 +125,7 @@ def run_poirot(
         session_id=session_id,
         include_tool_calls=include_tool_calls,
         include_broadcast_messages=include_broadcast_messages,
+        full_context=full_context,
         api_call_delay=api_call_delay,
         use_local_llm=use_local_llm,
         local_model_name=resolved_model if use_local_llm else None,

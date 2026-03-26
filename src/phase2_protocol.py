@@ -295,7 +295,7 @@ def add_message_metadata(message: BaseMessage, from_node: str, to_node: str) -> 
     message.additional_kwargs['metadata']['to_node'] = to_node
 
 
-def filter_messages_for_agent(messages: List[BaseMessage], agent_id: str, include_broadcast: bool = False) -> List[BaseMessage]:
+def filter_messages_for_agent(messages: List[BaseMessage], agent_id: str, include_broadcast: bool = False, full_context: bool = False) -> List[BaseMessage]:
     """
     Filter messages to only include those where the agent participates.
     
@@ -348,11 +348,15 @@ def filter_messages_for_agent(messages: List[BaseMessage], agent_id: str, includ
         is_sender = (from_node == agent_id)
         is_receiver = (to_node == agent_id)
 
-        # Logic to determine inclusion
-        should_include = False
-        if is_sender: should_include = True
-        if is_receiver: should_include = True
-        if include_broadcast and is_broadcast: should_include = True
+        # Logic to determine inclusion.
+        # full_context=True: every agent sees all messages in the session.
+        if full_context:
+            should_include = True
+        else:
+            should_include = False
+            if is_sender: should_include = True
+            if is_receiver: should_include = True
+            if include_broadcast and is_broadcast: should_include = True
 
         if not should_include:
             continue
@@ -1076,6 +1080,7 @@ def create_agent_nodes(
     output_dir: Optional[Path] = None,
     include_tool_calls: bool = False,
     include_broadcast_messages: bool = False,
+    full_context: bool = False,
     api_call_delay: float = 0.0,
     use_local_llm: bool = False,
     local_model_name: Optional[str] = None,
@@ -1148,7 +1153,7 @@ def create_agent_nodes(
         force_final_vote = will_reach_limit and not has_final_report
         
         # Filter to messages where this agent participated (or broadcasts if enabled)
-        filtered = filter_messages_for_agent(all_messages, agent_id, include_broadcast_messages)
+        filtered = filter_messages_for_agent(all_messages, agent_id, include_broadcast_messages, full_context)
         # Pass include_tool_calls and current_agent_id
         filtered = clean_historical_messages(
             filtered, 
@@ -1815,6 +1820,7 @@ def execute_phase2_analysis(
     recursion_limit: int = 200,
     include_tool_calls: bool = False,
     include_broadcast_messages: bool = False,
+    full_context: bool = False,
     api_call_delay: float = 0.0,
     use_local_llm: bool = False,
     local_model_name: Optional[str] = None,
@@ -1990,6 +1996,7 @@ def execute_phase2_analysis(
             output_dir=output_dir,
             include_tool_calls=include_tool_calls,
             include_broadcast_messages=include_broadcast_messages,
+            full_context=full_context,
             api_call_delay=api_call_delay,
             use_local_llm=use_local_llm,
             local_model_name=local_model_name,

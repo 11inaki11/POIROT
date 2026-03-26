@@ -1,10 +1,19 @@
-# Database Schema
+# Integration — SQLite Database
 
-POIROT reads session data from a SQLite database. You are responsible for populating it with your system's data. POIROT does not write to these tables — it only reads from them.
+The SQLite database integration is the most flexible way to use POIROT. Any system — regardless of language or framework — can write session data to a SQLite file and hand it to POIROT for analysis.
 
 ---
 
-## Getting the schema
+## When to use this integration
+
+- Your agents are not built with a specific Python framework
+- You want full control over what data POIROT receives
+- Your system is in production and you want to log sessions for later analysis
+- Your system is not written in Python
+
+---
+
+## Setup
 
 Copy `templates/poirot_schema.sql` from the repository and initialize your database:
 
@@ -19,33 +28,22 @@ conn.close()
 
 ---
 
-## Tables overview
+## Tables
 
-```
-sessions          ← One row per execution run
-agents            ← One row per agent (immutable once used in a session)
-agent_tools       ← One row per tool per agent
-messages          ← One row per message exchanged between agents
-```
-
-Only `sessions`, `agents`, and `messages` are required. `agent_tools` is needed only if your agents use tools.
-
----
-
-## `sessions`
+### `sessions`
 
 One row per execution of your system.
 
 **Required columns:**
 
 | Column | Type | Example |
-|--------|------|---------|
+| ------ | ---- | ------- |
 | `session_id` | TEXT (PK) | `"run_001"` |
 | `system_name` | TEXT | `"StockTradingBot"` |
 | `session_number` | INTEGER | `1` |
 | `created_at` | TEXT (ISO 8601) | `"2025-01-20T10:30:00.000000"` |
 
-**Useful optional columns:** `updated_at`, `session_notes`, `input_context`, `final_output`, `execution_time_seconds`, `custom_metadata` (JSON string).
+**Optional columns:** `updated_at`, `session_notes`, `input_context`, `final_output`, `execution_time_seconds`, `custom_metadata` (JSON string).
 
 ```python
 from datetime import datetime
@@ -58,14 +56,14 @@ cursor.execute("""
 
 ---
 
-## `agents`
+### `agents`
 
-One row per agent. **Treat entries as immutable once referenced by a session.** If you update an agent's configuration, create a new row with a new `agent_id` instead of overwriting the old one. This preserves the historical record.
+One row per agent. **Treat entries as immutable once referenced by a session.** If you update an agent's configuration, create a new row with a new `agent_id` — never overwrite an existing one. This preserves the historical record for past sessions.
 
 **Required columns:**
 
 | Column | Type | Example |
-|--------|------|---------|
+| ------ | ---- | ------- |
 | `agent_id` | TEXT (PK) | `"portfolio_manager"` |
 | `agent_name` | TEXT | `"Portfolio Manager"` |
 | `system_name` | TEXT | `"StockTradingBot"` |
@@ -88,18 +86,18 @@ cursor.execute("""
 
 ---
 
-## `messages`
+### `messages`
 
 The most important table. One row per message exchanged in the session.
 
 **Required columns:**
 
 | Column | Type | Example |
-|--------|------|---------|
+| ------ | ---- | ------- |
 | `message_id` | TEXT (PK) | `"msg_001"` |
 | `session_id` | TEXT (FK) | `"run_001"` |
 | `from_agent_id` | TEXT | `"portfolio_manager"` |
-| `to_agent_id` | TEXT | `"risk_manager"` (NULL = broadcast to all) |
+| `to_agent_id` | TEXT | `"risk_manager"` (NULL = broadcast) |
 | `message_type` | TEXT | `"ai"`, `"human"`, `"tool"` |
 | `content` | TEXT | `"I recommend selling AAPL"` |
 | `timestamp` | TEXT (ISO 8601) | `"2025-01-20T10:31:45.678901"` |
@@ -129,11 +127,11 @@ cursor.execute("""
 
 ---
 
-## `agent_tools`
+### `agent_tools` (optional)
 
-One row per tool available to an agent.
+One row per tool available to an agent. Only needed if your agents use tools.
 
-**Required columns:** `agent_id` (FK), `tool_name` — together they form the primary key.
+**Required columns:** `agent_id` (FK) + `tool_name` — together they form the primary key.
 
 **Optional columns:** `tool_description`, `tool_schema` (JSON), `tool_code` (valid Python with docstring), `is_enabled` (0/1).
 
@@ -142,12 +140,31 @@ One row per tool available to an agent.
 ## Key rules
 
 1. **`sequence_number` must be strictly sequential** within each session. POIROT relies on message order.
-2. **Timestamps must be ISO 8601** with microseconds: `datetime.now().isoformat()` works directly in Python.
-3. **JSON fields** (`can_communicate_with`, `tool_input`, etc.) must use double quotes — standard JSON, not Python dict syntax.
+2. **Timestamps must be ISO 8601** with microseconds. In Python: `datetime.now().isoformat()`.
+3. **JSON fields** (`can_communicate_with`, `tool_input`, etc.) must use standard JSON with double quotes.
 4. **Agent entries are immutable** once a session references them. Add a new `agent_id` for updated configurations.
 
 ---
 
-## Full reference
+## Running the analysis
 
-For the complete schema with all columns and SQL types, see [docs/DATABASE_SCHEMA.md](../DATABASE_SCHEMA.md) or the `templates/poirot_schema.sql` file.
+Once the database is populated:
+
+```python
+import poirot
+
+results = poirot.run_poirot(
+    database_path="my_system.db",
+    system_name="StockTradingBot",
+    system_description="""
+        A 3-agent trading system:
+        - AnalystAgent: analyzes market data and produces a buy/sell recommendation
+        - RiskAgent: evaluates the risk of the recommendation
+        - ExecutorAgent: executes the final trade decision
+    """,
+    provider="gemini",
+    api_key="YOUR_API_KEY",
+)
+```
+
+See [API Reference](../api-reference.md) for all available parameters.

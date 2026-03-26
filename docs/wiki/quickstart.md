@@ -8,20 +8,14 @@ pip install poirot-framework
 
 ---
 
-## 2. Prepare your database
+## 2. Choose how to provide your session data
 
-You need a SQLite database populated with your session data. See [Database Schema](database-schema.md) for the full guide.
+POIROT needs the conversation history of the session you want to analyze. How you provide it depends on your system:
 
-The easiest way to get the schema is to copy `templates/poirot_schema.sql` from the repository and run it:
+- **SQLite database** — the most flexible option, works with any system. See [Integrations → Database](integrations/database.md) for setup.
+- **LangChain agents** — *(coming soon)*
 
-```python
-import sqlite3
-
-conn = sqlite3.connect("my_system.db")
-with open("poirot_schema.sql") as f:
-    conn.executescript(f.read())
-conn.close()
-```
+The quickstart below uses the SQLite database integration.
 
 ---
 
@@ -35,44 +29,30 @@ results = poirot.run_poirot(
     system_name="MyAgentSystem",
     system_description="""
         A multi-agent system with 3 agents:
-        - PlannerAgent: decomposes the task into subtasks
-        - ExecutorAgent: executes each subtask
-        - ReviewerAgent: validates the final output
+        - PlannerAgent: decomposes the user request into subtasks
+        - ExecutorAgent: executes each subtask using external tools
+        - ReviewerAgent: validates the final output before delivery
+        Communication flow: User → Planner → Executor → Reviewer → User
     """,
     provider="gemini",
     api_key="YOUR_API_KEY",
 )
 ```
 
-That is all that is required. POIROT will print progress to the terminal and save detailed results to `poirot_results/` (configurable via `output_dir`).
+POIROT prints progress to the terminal and writes detailed results to `poirot_results/` (configurable via `output_dir`).
 
 ---
 
-## 4. Use the launcher script (alternative)
+## 4. Use a .env file (recommended)
 
-If you prefer a script-based workflow, copy `run_poirot.py` from the repository, edit the configuration section at the top, and run:
+Never hardcode API keys. Create a `.env` file:
 
-```bash
-python run_poirot.py --provider gemini
-python run_poirot.py --provider deepseek
-python run_poirot.py --provider ollama
-python run_poirot.py --provider local     # LM Studio
-```
-
-The launcher detects all sessions in the database and lets you select one interactively.
-
----
-
-## 5. Using a .env file (recommended)
-
-Avoid hardcoding API keys. Create a `.env` file:
-
-```
+```env
 GOOGLE_API_KEY=your_key_here
 DEEPSEEK_API_KEY=your_key_here
 ```
 
-Then load it before calling `run_poirot()`:
+Then:
 
 ```python
 from dotenv import load_dotenv
@@ -89,3 +69,18 @@ results = poirot.run_poirot(
     api_key=os.getenv("GOOGLE_API_KEY"),
 )
 ```
+
+---
+
+## 5. Use the launcher script
+
+For a script-based workflow, copy `run_poirot.py` from the repository, edit the configuration block at the top, and run:
+
+```bash
+python run_poirot.py --provider gemini
+python run_poirot.py --provider deepseek
+python run_poirot.py --provider ollama
+python run_poirot.py --provider local    # LM Studio
+```
+
+The script lists all sessions in the database and lets you pick one interactively.

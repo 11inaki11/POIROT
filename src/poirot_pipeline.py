@@ -72,6 +72,7 @@ class POIROTPipeline:
         session_id: Optional[str] = None,
         include_tool_calls: bool = False,
         include_broadcast_messages: bool = False,
+        full_context: bool = False,
         api_call_delay: float = 0.0,
         use_local_llm: bool = False,
         local_model_name: Optional[str] = None,
@@ -109,6 +110,7 @@ class POIROTPipeline:
         self.session_id = session_id
         self.include_tool_calls = include_tool_calls
         self.include_broadcast_messages = include_broadcast_messages
+        self.full_context = full_context
         self.api_call_delay = api_call_delay
         self.use_local_llm = use_local_llm
         self.local_model_name = local_model_name
@@ -504,6 +506,7 @@ class POIROTPipeline:
             session_name=session_name,
             include_tool_calls=self.include_tool_calls,
             include_broadcast_messages=self.include_broadcast_messages,
+            full_context=self.full_context,
             token_tracker=self.token_tracker,
             use_local_llm=self.use_local_llm,
             local_model_name=self.local_model_name,
@@ -576,6 +579,7 @@ class POIROTPipeline:
             recursion_limit=300,  # Increased limit for full agent consultation
             include_tool_calls=self.include_tool_calls,
             include_broadcast_messages=self.include_broadcast_messages,
+            full_context=self.full_context,
             api_call_delay=self.api_call_delay,
             use_local_llm=self.use_local_llm,
             local_model_name=self.local_model_name,

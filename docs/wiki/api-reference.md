@@ -41,9 +41,14 @@ Returns a `dict` with the full analysis results including agent votes and the fi
 ## Optional parameters — message context
 
 | Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
+| --------- | ---- | ------- | ----------- |
 | `include_tool_calls` | `bool` | `False` | Include tool call and tool result messages in agent context windows during Phase 1 and 2. |
 | `include_broadcast_messages` | `bool` | `False` | Include messages sent to all agents (`to_agent_id = NULL`) in context windows. |
+| `full_context` | `bool` | `False` | If `True`, each agent receives **all messages from all agents** in the session, not just the ones they sent or received. Messages from other agents are presented as `HumanMessage` with a `From [agent_id]:` header. See warning below. |
+
+> **Warning — `full_context=True` and context overflow**
+>
+> In the default mode (`full_context=False`), each agent only sees the messages it was directly involved in. With `full_context=True`, every agent sees the entire session history. In systems with many agents or long sessions, this can multiply the token count per agent by N (number of agents), easily exceeding the model's context window. Use with caution and consider lowering `token_budget` accordingly.
 
 ---
 

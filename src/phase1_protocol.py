@@ -184,6 +184,7 @@ def execute_phase1_analysis(
     session_name: str,
     include_tool_calls: bool = False,
     include_broadcast_messages: bool = False,
+    full_context: bool = False,
     token_tracker: Optional[Any] = None,
     use_local_llm: bool = False,
     local_model_name: Optional[str] = None,
@@ -247,31 +248,25 @@ def execute_phase1_analysis(
         print(f"🤖 {agent_name.upper()} (ID: {agent_id}) - INDIVIDUAL ANALYSIS")
         print(f"{'─'*80}")
         
-        # Filter messages for this agent (messages they sent OR received)
-        # Keep only ProcessedMessage objects where agent participated
-        # EXCLUDE broadcasts ("all") UNLESS include_broadcast_messages is True
+        # Filter messages for this agent.
+        # full_context=True: every agent sees all messages in the session.
+        # full_context=False (default): only messages the agent sent or received.
         filtered_processed = []
         for pm in processed_messages:
-            # Check for broadcast
             is_broadcast = (pm.to_agent in ["all", "broadcast"])
-            
-            # Participation logic
             is_sender = (pm.from_agent == agent_id)
             is_direct_receiver = (pm.to_agent == agent_id)
-            
-            should_include = False
-            if is_sender: should_include = True
-            if is_direct_receiver: should_include = True
-            if include_broadcast_messages and is_broadcast: should_include = True
-            
-            # Final check: if user wanted broadcasts in, we keep them.
-            # If user wanted them out, we skip them even if they slipped through logic.
-            # But wait, logic above says skip unless specifically authorized or direct.
-            # However, previous hard filter was `pm.to_agent != "all"`.
-            # We must respect that preference.
-            
+
+            if full_context:
+                should_include = True
+            else:
+                should_include = False
+                if is_sender: should_include = True
+                if is_direct_receiver: should_include = True
+                if include_broadcast_messages and is_broadcast: should_include = True
+
             if should_include:
-                 filtered_processed.append(pm)
+                filtered_processed.append(pm)
         
         # Clean messages (remove tool-only AIMessages and technical ToolMessages)
         # Pass include_tool_calls flag and current agent_id (for personalized tool filtering)

@@ -27,6 +27,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage, AIMessage
 
+from src.agent_factory import clean_conversational_messages as _clean_conversational_messages
+
 # Import token tracker
 try:
     from token_tracker import TokenTracker, extract_tokens_from_response
@@ -182,6 +184,7 @@ def execute_phase1_analysis(
     vectors_to_ignore: Optional[List[str]],
     output_dir: Path,
     session_name: str,
+    communication_tool_names: Optional[set] = None,
     include_tool_calls: bool = False,
     include_broadcast_messages: bool = False,
     full_context: bool = False,
@@ -268,13 +271,22 @@ def execute_phase1_analysis(
             if should_include:
                 filtered_processed.append(pm)
         
-        # Clean messages (remove tool-only AIMessages and technical ToolMessages)
-        # Pass include_tool_calls flag and current agent_id (for personalized tool filtering)
-        cleaned_processed = agent_factory.clean_conversational_messages(
-            filtered_processed, 
-            include_tool_calls=include_tool_calls,
-            current_agent_id=agent_id
-        )
+        # Clean messages (remove tool-only AIMessages and technical ToolMessages).
+        # Use the factory's method when available, otherwise call the module-level function
+        # directly (agentless / LangChain adapter mode).
+        if agent_factory is not None:
+            cleaned_processed = agent_factory.clean_conversational_messages(
+                filtered_processed,
+                include_tool_calls=include_tool_calls,
+                current_agent_id=agent_id,
+            )
+        else:
+            cleaned_processed = _clean_conversational_messages(
+                processed_messages=filtered_processed,
+                include_tool_calls=include_tool_calls,
+                current_agent_id=agent_id,
+                communication_tool_names=communication_tool_names or set(),
+            )
         
         # Format messages with timestamps and headers (similar to Phase 2)
         formatted_messages = []

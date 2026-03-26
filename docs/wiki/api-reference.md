@@ -1,4 +1,11 @@
-# API Reference — `run_poirot()`
+# API Reference
+
+- `run_poirot()` — analyze a session from a SQLite database
+- `run_poirot_from_agents()` — analyze live LangChain agent objects (see [LangChain integration](integrations/langchain.md))
+
+---
+
+## `run_poirot()`
 
 ```python
 poirot.run_poirot(
@@ -121,3 +128,45 @@ results = poirot.run_poirot(
     retry_delay_429=60,
 )
 ```
+
+---
+
+## `run_poirot_from_agents()`
+
+Analyze live LangChain/LangGraph agent objects directly — no database required.
+
+```python
+from poirot import run_poirot_from_agents, LangChainAgentAdapter
+
+results = run_poirot_from_agents(
+    agents=[...],
+    system_name="MySystem",
+    system_description="...",
+    provider="gemini",
+    model="gemini-2.5-pro",
+    api_key="YOUR_KEY",
+)
+```
+
+See the [LangChain integration guide](integrations/langchain.md) for full usage.
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `agents` | `list[LangChainAgentAdapter]` | required | Agent objects and their message histories |
+| `system_name` | `str` | required | Short name for your system |
+| `system_description` | `str` | required | Description of your system architecture |
+| `provider` | `str` | required | LLM provider — no default, must be explicit |
+| `model` | `str` | required | Model name — no default, must be explicit |
+| `api_key` | `str` | `None` | API key. Not required for `"ollama"` or `"local"`. |
+| `output_dir` | `str` | `"poirot_results"` | Directory for result files |
+| `ignore_list` | `list[str]` | `None` | Component names to exclude from error vector analysis |
+| `include_tool_calls` | `bool` | `False` | Include tool call messages in context windows |
+| `include_broadcast_messages` | `bool` | `False` | Include broadcast messages in context windows |
+| `full_context` | `bool` | `False` | Each agent sees all session messages (see context overflow warning above) |
+| `ollama_num_ctx` | `int` | `131072` | Context window size for Ollama models |
+| `token_budget` | `int` | `95000` | Max tokens in Phase 2 context windows |
+| `max_agent_messages` | `int` | `8` | Max LLM calls per agent in Phase 2 |
+| `api_call_delay` | `float` | `0.0` | Seconds between LLM calls |
+| `max_llm_retries` | `int` | `5` | Max retries on transient errors |
+| `retry_delay_503` | `int` | `30` | Wait seconds after a 503 error |
+| `retry_delay_429` | `int` | `60` | Wait seconds after a 429 error |

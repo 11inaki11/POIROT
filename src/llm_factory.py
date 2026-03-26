@@ -46,8 +46,9 @@ class LLMFactory:
     """
     Factory class for creating LLM instances.
     
-    Supports four backends:
+    Supports five backends:
     - Gemini API: Uses langchain_google_genai.ChatGoogleGenerativeAI
+    - OpenAI API: Uses langchain_openai.ChatOpenAI
     - DeepSeek API: Uses langchain_openai.ChatOpenAI with DeepSeek endpoint
     - LM Studio: Uses langchain_openai.ChatOpenAI with local endpoint
     - Ollama: Uses langchain_openai.ChatOpenAI with Ollama local endpoint
@@ -88,7 +89,7 @@ class LLMFactory:
             model_name: Model name for the provider
             use_local: If True, use LM Studio (legacy support, same as provider="local")
             local_model_name: Model name for LM Studio (default: gpt-oss-20b)
-            provider: LLM provider - "gemini", "deepseek", "local", or "ollama"
+            provider: LLM provider - "gemini", "openai", "deepseek", "local", or "ollama"
             temperature: Temperature for generation (default: 0)
             max_tokens: Maximum tokens for generation (optional)
             base_url: Custom base URL (optional)
@@ -186,18 +187,37 @@ class LLMFactory:
 
             return ChatOpenAI(**llm_kwargs)
         
+        elif provider == "openai":
+            # Use OpenAI API
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                raise ValueError("OPENAI_API_KEY not found in environment variables. Please set it in your .env file.")
+
+            llm_kwargs = {
+                "model": model_name,
+                "temperature": temperature,
+                "api_key": api_key,
+            }
+
+            if max_tokens:
+                llm_kwargs["max_tokens"] = max_tokens
+
+            llm_kwargs.update(kwargs)
+
+            return ChatOpenAI(**llm_kwargs)
+
         else:
             # Default: Use Gemini API
             llm_kwargs = {
                 "model": model_name,
                 "temperature": temperature,
             }
-            
+
             if max_tokens:
                 llm_kwargs["max_tokens"] = max_tokens
-                
+
             llm_kwargs.update(kwargs)
-            
+
             return ChatGoogleGenerativeAI(**llm_kwargs)
     
     @classmethod
@@ -222,7 +242,7 @@ class LLMFactory:
             model_name: Model name for the provider
             use_local: If True, use LM Studio instead of Gemini
             local_model_name: Model name for LM Studio (default: gpt-oss-20b)
-            provider: LLM provider - "gemini", "deepseek", "local", or "ollama"
+            provider: LLM provider - "gemini", "openai", "deepseek", "local", or "ollama"
             temperature: Temperature for generation (default: 0)
             max_tokens: Maximum tokens for generation (optional)
             base_url: Custom base URL
@@ -272,6 +292,8 @@ class LLMFactory:
         if provider == "local":
             actual_model = local_model_name or cls.DEFAULT_LOCAL_MODEL
             return f"{actual_model} (LM Studio - Local)"
+        elif provider == "openai":
+            return f"{model_name} (OpenAI API)"
         elif provider == "deepseek":
             # Show actual DeepSeek model, not the Gemini model from DB
             if model_name.startswith("gemini") or model_name.startswith("models/gemini"):

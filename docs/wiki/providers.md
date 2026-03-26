@@ -1,6 +1,6 @@
 # LLM Providers
 
-POIROT supports 4 LLM providers. Select one via the `provider` parameter in `run_poirot()`.
+POIROT supports 5 LLM providers. Select one via the `provider` parameter in `run_poirot()` or `run_poirot_from_agents()`.
 
 ---
 
@@ -17,6 +17,22 @@ results = poirot.run_poirot(
 - **Default model:** `gemini-2.5-pro`
 - **API key env var:** `GOOGLE_API_KEY`
 - Get your key at [aistudio.google.com](https://aistudio.google.com)
+
+---
+
+## OpenAI
+
+```python
+results = poirot.run_poirot(
+    ...
+    provider="openai",
+    api_key="YOUR_OPENAI_API_KEY",
+)
+```
+
+- **Default model:** `gpt-4o`
+- **API key env var:** `OPENAI_API_KEY`
+- Get your key at [platform.openai.com](https://platform.openai.com)
 
 ---
 
@@ -80,8 +96,9 @@ results = poirot.run_poirot(
 ## Default models summary
 
 | Provider | Default model |
-|----------|--------------|
+| --- | --- |
 | `gemini` | `gemini-2.5-pro` |
+| `openai` | `gpt-4o` |
 | `deepseek` | `deepseek-chat` |
 | `ollama` | `gpt-oss:20b` |
 | `local` | `gpt-oss-20b` |

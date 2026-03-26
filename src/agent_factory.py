@@ -30,6 +30,76 @@ from src.llm_factory import LLMFactory
 
 
 ##############################################################################
+#======================== MODULE-LEVEL UTILITIES ==========================#
+##############################################################################
+
+def clean_conversational_messages(
+    processed_messages: List["ProcessedMessage"],
+    include_tool_calls: bool = False,
+    current_agent_id: Optional[str] = None,
+    communication_tool_names: Optional[set] = None,
+) -> List:
+    """
+    Filter a list of ProcessedMessage objects down to conversational context only.
+
+    Args:
+        processed_messages: List of ProcessedMessage objects to filter.
+        include_tool_calls: If True, keep non-communication tool calls/results
+            that belong to current_agent_id.
+        current_agent_id: ID of the agent being analyzed (used for tool filtering).
+        communication_tool_names: Set of tool names considered inter-agent
+            communication (e.g. talk_to_*). Pass an empty set when no such
+            tools exist (e.g. raw LangChain agents).
+
+    Returns:
+        Filtered list of LangChain BaseMessage objects.
+    """
+    if communication_tool_names is None:
+        communication_tool_names = set()
+
+    cleaned = []
+    seen_messages = set()
+
+    for pm in processed_messages:
+        msg = pm.message
+
+        if pm.msg_type in ["human", "system"]:
+            content_hash = hash(msg.content) if msg.content else 0
+            msg_key = (content_hash, pm.msg_type, pm.from_agent, pm.to_agent)
+            if msg_key not in seen_messages:
+                seen_messages.add(msg_key)
+                cleaned.append(msg)
+            continue
+
+        is_my_tool_usage = (current_agent_id and pm.from_agent == current_agent_id)
+
+        if pm.msg_type == "ai":
+            has_content = msg.content and msg.content.strip()
+            is_comm_tool = pm.is_tool_call and pm.tool_name in communication_tool_names
+            keep_as_tool_call = pm.is_tool_call and include_tool_calls and is_my_tool_usage
+            if has_content or is_comm_tool or keep_as_tool_call:
+                content_hash = hash(msg.content) if msg.content else 0
+                msg_key = (content_hash, pm.msg_type, pm.from_agent)
+                if msg_key not in seen_messages:
+                    seen_messages.add(msg_key)
+                    cleaned.append(msg)
+            continue
+
+        if pm.msg_type == "tool":
+            is_comm_tool = pm.tool_name in communication_tool_names
+            is_tool_result_for_me = (current_agent_id and pm.to_agent == current_agent_id)
+            keep_as_tool_result = include_tool_calls and is_tool_result_for_me
+            if is_comm_tool or keep_as_tool_result:
+                content_hash = hash(msg.content) if msg.content else 0
+                msg_key = (content_hash, pm.msg_type, pm.tool_name)
+                if msg_key not in seen_messages:
+                    seen_messages.add(msg_key)
+                    cleaned.append(msg)
+
+    return cleaned
+
+
+##############################################################################
 #======================== DATA STRUCTURES ================================#
 ##############################################################################
 
@@ -681,91 +751,23 @@ class AgentFactory:
         return filtered
     
     def clean_conversational_messages(
-        self, 
+        self,
         processed_messages: List[ProcessedMessage],
         include_tool_calls: bool = False,
         current_agent_id: str = None
     ) -> List[BaseMessage]:
         """
         Clean messages to keep only conversational context.
-        
-        Filtering strategy (same as graphPOIROTMini.clean_historical_messages):
-        - KEEP: User messages (HumanMessage)
-        - KEEP: AI responses with content
-        - KEEP: System messages
-        - KEEP: Communication tool responses (talk_to_*)
-        - IF include_tool_calls=True: KEEP generic tool calls/results ONLY if related to current_agent_id
-        - OTHERWISE REMOVE: Tool-only AI messages (no content, only tool_calls)
-        - OTHERWISE REMOVE: Technical tool responses (non-communication tools)
-        
-        Args:
-            processed_messages: List of ProcessedMessage objects
-            include_tool_calls: Whether to include non-communication tool usage
-            current_agent_id: ID of the agent whose tool usage should be visible
-        
-        Returns:
-            List of cleaned LangChain messages
-        """
-        cleaned = []
-        seen_messages = set()
-        
-        for pm in processed_messages:
-            msg = pm.message
-            
-            # Always keep human (from logic) and system messages
-            if pm.msg_type in ["human", "system"]:
-                content_hash = hash(msg.content) if msg.content else 0
-                # Use a simpler key to avoid large objects in set
-                msg_key = (content_hash, pm.msg_type, pm.from_agent, pm.to_agent)
-                
-                if msg_key not in seen_messages:
-                    seen_messages.add(msg_key)
-                    cleaned.append(msg)
-                continue
-            
-            # Helper to check if tool usage is ours
-            is_my_tool_usage = (current_agent_id and pm.from_agent == current_agent_id)
-            
-            # AI messages: keep if has content OR is communication tool call OR (include_tool_calls is True and it's my tool)
-            if pm.msg_type == "ai":
-                has_content = msg.content and msg.content.strip()
-                is_comm_tool = pm.is_tool_call and pm.tool_name in self.communication_tool_names
-                
-                # If including generic tool calls, keep if it's from me
-                keep_as_tool_call = False
-                if pm.is_tool_call and include_tool_calls and is_my_tool_usage:
-                    keep_as_tool_call = True
 
-                if has_content or is_comm_tool or keep_as_tool_call:
-                    content_hash = hash(msg.content) if msg.content else 0
-                    msg_key = (content_hash, pm.msg_type, pm.from_agent)
-                    
-                    if msg_key not in seen_messages:
-                        seen_messages.add(msg_key)
-                        cleaned.append(msg)
-                continue
-            
-            # Tool messages: keep communication tools OR (include_tool_calls is True and it's my tool result)
-            if pm.msg_type == "tool":
-                is_comm_tool = pm.tool_name in self.communication_tool_names
-                
-                # Check if this tool result belongs to a tool call made by me
-                # Usually tool messages have 'to_agent' set to the agent who called it
-                is_tool_result_for_me = (current_agent_id and pm.to_agent == current_agent_id)
-                
-                keep_as_tool_result = False
-                if include_tool_calls and is_tool_result_for_me:
-                    keep_as_tool_result = True
-                
-                if is_comm_tool or keep_as_tool_result:
-                    content_hash = hash(msg.content) if msg.content else 0
-                    msg_key = (content_hash, pm.msg_type, pm.tool_name)
-                    
-                    if msg_key not in seen_messages:
-                        seen_messages.add(msg_key)
-                        cleaned.append(msg)
-        
-        return cleaned
+        Delegates to the module-level clean_conversational_messages() function,
+        passing this factory's communication_tool_names set.
+        """
+        return clean_conversational_messages(
+            processed_messages=processed_messages,
+            include_tool_calls=include_tool_calls,
+            current_agent_id=current_agent_id,
+            communication_tool_names=self.communication_tool_names,
+        )
     
     def add_message_metadata(self, message: BaseMessage, from_node: str, to_node: str) -> BaseMessage:
         """

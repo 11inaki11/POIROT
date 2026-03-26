@@ -1831,6 +1831,9 @@ def execute_phase2_analysis(
     retry_delay_503: int = 30,
     retry_delay_429: int = 60,
     token_budget: int = 95_000,
+    # Agentless bypass — when provided, skip internal DB reads entirely
+    historical_messages_override: Optional[List[BaseMessage]] = None,
+    agents_data_override: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Execute POIROT Phase 2: Peer Consultation Protocol.
@@ -1875,72 +1878,78 @@ def execute_phase2_analysis(
     print(f"{'='*80}\n")
     
     # ═══════════════════════════════════════════════════════════════════════
-    # STEP 1: Load agents and their relationships from database
-    # Use smart loading to get only relevant agents for this session:
-    # - Agents that participated in the session
-    # - For missing agent types, the most frequent instance across all sessions
+    # STEP 1: Load agents and their relationships
+    # When agents_data_override is provided (agentless / LangChain adapter mode)
+    # skip the database query entirely.
     # ═══════════════════════════════════════════════════════════════════════
-    print("📚 STEP 1: Loading agents from database...")
-    
-    agents_data, agent_order = get_agents_for_session(
-        db_path=str(db_path),
-        session_id=session_id
-    )
-    
-    # Validate: ensure we have exactly ONE agent per type (no duplicates)
-    if not validate_one_agent_per_type(agents_data):
-        raise ValueError(
-            "Agent loading failed: Multiple instances of same agent type detected. "
-            "This indicates a bug in the session agent loader."
+    if agents_data_override is not None:
+        print("📚 STEP 1: Using pre-built agent data (agentless mode)...")
+        agents_data = agents_data_override
+        agent_order = list(agents_data_override.keys())
+    else:
+        print("📚 STEP 1: Loading agents from database...")
+        agents_data, agent_order = get_agents_for_session(
+            db_path=str(db_path),
+            session_id=session_id
         )
-    
+        # Validate: ensure we have exactly ONE agent per type (no duplicates)
+        if not validate_one_agent_per_type(agents_data):
+            raise ValueError(
+                "Agent loading failed: Multiple instances of same agent type detected. "
+                "This indicates a bug in the session agent loader."
+            )
+
     # ═══════════════════════════════════════════════════════════════════════
-    # STEP 2: Load historical messages from database
+    # STEP 2: Load historical messages
+    # When historical_messages_override is provided (agentless / LangChain adapter
+    # mode) skip the database query entirely.
     # ═══════════════════════════════════════════════════════════════════════
-    print("📜 STEP 2: Loading historical messages...")
-    
-    conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        SELECT message_type, content, from_agent_id, to_agent_id, sequence_number, timestamp
-        FROM messages
-        WHERE session_id = ?
-        ORDER BY sequence_number
-    """, (session_id,))
-    
-    historical_messages = []
-    
-    for row in cursor.fetchall():
-        message_type, content, from_agent_id, to_agent_id, seq_num, timestamp = row
-        
-        # Convert to LangChain message based on message_type
-        # We use HumanMessage as a generic container for now.
-        # The specific type (AI vs Human) will be determined relative to the viewer in filter_messages_for_agent
-        if message_type == 'system':
-            msg = SystemMessage(content=content)
-        else:
-            msg = HumanMessage(content=content)
-        
-        # Add metadata for filtering
-        # IMPORTANT: For historical messages, we must ensure from_node and to_node are set
-        # even if they are None in the database (e.g. broadcast messages)
-        sender = from_agent_id if from_agent_id else "unknown"
-        receiver = to_agent_id if to_agent_id else "all"
-        
-        if not hasattr(msg, 'additional_kwargs'):
-            msg.additional_kwargs = {}
-        if 'metadata' not in msg.additional_kwargs:
-            msg.additional_kwargs['metadata'] = {}
-            
-        msg.additional_kwargs['metadata']['from_node'] = sender
-        msg.additional_kwargs['metadata']['to_node'] = receiver
-        msg.additional_kwargs['metadata']['timestamp'] = timestamp
-        
-        historical_messages.append(msg)
-    
-    conn.close()
-    
+    if historical_messages_override is not None:
+        print("📜 STEP 2: Using pre-built historical messages (agentless mode)...")
+        historical_messages = historical_messages_override
+    else:
+        print("📜 STEP 2: Loading historical messages from database...")
+
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT message_type, content, from_agent_id, to_agent_id, sequence_number, timestamp
+            FROM messages
+            WHERE session_id = ?
+            ORDER BY sequence_number
+        """, (session_id,))
+
+        historical_messages = []
+
+        for row in cursor.fetchall():
+            message_type, content, from_agent_id, to_agent_id, _seq_num, timestamp = row
+
+            # Convert to LangChain message based on message_type.
+            # The specific type (AI vs Human) will be determined relative to the viewer
+            # in filter_messages_for_agent.
+            if message_type == 'system':
+                msg = SystemMessage(content=content)
+            else:
+                msg = HumanMessage(content=content)
+
+            # Add metadata for filtering.
+            sender = from_agent_id if from_agent_id else "unknown"
+            receiver = to_agent_id if to_agent_id else "all"
+
+            if not hasattr(msg, 'additional_kwargs'):
+                msg.additional_kwargs = {}
+            if 'metadata' not in msg.additional_kwargs:
+                msg.additional_kwargs['metadata'] = {}
+
+            msg.additional_kwargs['metadata']['from_node'] = sender
+            msg.additional_kwargs['metadata']['to_node'] = receiver
+            msg.additional_kwargs['metadata']['timestamp'] = timestamp
+
+            historical_messages.append(msg)
+
+        conn.close()
+
     print(f"  ✅ Loaded {len(historical_messages)} historical messages")
     print()
     

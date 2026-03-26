@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "poirot-framework"
+version = "1.1.0"
+description = "POIROT: Automated forensic analysis for multi-agent AI systems"
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["multi-agent", "forensics", "LLM", "analysis", "POIROT"]
+dependencies = [
+    "langchain-core>=0.3",
+    "langchain-google-genai>=2.0",
+    "langchain-openai>=0.2",
+    "langgraph>=0.2",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.setuptools.package-dir]
+"poirot" = "src"

@@ -13,7 +13,7 @@ pip install poirot-framework
 POIROT needs the conversation history of the session you want to analyze. How you provide it depends on your system:
 
 - **SQLite database** — the most flexible option, works with any system. See [Integrations → Database](integrations/database.md) for setup.
-- **LangChain agents** — *(coming soon)*
+- **LangChain agents** — pass your compiled agents directly. See [Integrations → LangChain](integrations/langchain.md).
 
 The quickstart below uses the SQLite database integration.
 

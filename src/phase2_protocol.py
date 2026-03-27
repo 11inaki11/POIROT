@@ -1067,6 +1067,7 @@ class CommunicationToolFactory:
 #====================== AGENT NODE FACTORIES ================================#
 ##############################################################################
 
+
 def create_agent_nodes(
     agent_id: str,
     agent_data: Dict[str, Any],
@@ -1082,8 +1083,6 @@ def create_agent_nodes(
     include_broadcast_messages: bool = False,
     full_context: bool = False,
     api_call_delay: float = 0.0,
-    use_local_llm: bool = False,
-    local_model_name: Optional[str] = None,
     token_tracker: Optional[Any] = None,
     llm_provider: str = "gemini",
     max_agent_messages: int = 8,
@@ -1115,18 +1114,41 @@ def create_agent_nodes(
     Returns:
         Tuple of (call_llm, take_action, tools_dict)
     """
-    # Initialize LLM with tools using LLMFactory
+    # Determine the LLM for this agent in Phase 2.
+    # Per-agent provider/model (from LangChainAgentAdapter) override the global
+    # defaults passed to execute_phase2_analysis. This allows mixed-model systems
+    # where each agent runs on a different LLM.
+    import os as _os
+    _agent_provider = agent_data.get("provider") or llm_provider
+    _agent_model    = agent_data.get("model") or model_name
+    _agent_api_key  = agent_data.get("api_key")
+
+    if _agent_api_key:
+        if _agent_provider == "deepseek":
+            _os.environ["DEEPSEEK_API_KEY"] = _agent_api_key
+        elif _agent_provider == "openai":
+            _os.environ["OPENAI_API_KEY"] = _agent_api_key
+        else:
+            _os.environ["GOOGLE_API_KEY"] = _agent_api_key
+
+    _use_local   = _agent_provider in ("local", "ollama")
+    _local_model = _agent_model if _use_local else None
+
     if LLMFactory is not None:
         llm = LLMFactory.create_chat_llm(
-            model_name=model_name,
-            use_local=use_local_llm,
-            local_model_name=local_model_name,
-            provider=llm_provider,
-            temperature=0
+            model_name=_agent_model,
+            use_local=_use_local,
+            local_model_name=_local_model,
+            provider=_agent_provider,
+            temperature=0,
         )
     else:
-        llm = ChatGoogleGenerativeAI(model=model_name, temperature=0)
-    llm_with_tools = llm.bind_tools(communication_tools)
+        llm = ChatGoogleGenerativeAI(model=_agent_model, temperature=0)
+
+    # Bind original agent tools + POIROT communication tools so the agent
+    # retains full capability while also being able to consult peers.
+    original_tools = list(agent_data.get("tools_dict", {}).values())
+    llm_with_tools = llm.bind_tools(original_tools + communication_tools)
     
     # Build tools dict for execution
     tools_dict = {tool.name: tool for tool in communication_tools}
@@ -2007,8 +2029,6 @@ def execute_phase2_analysis(
             include_broadcast_messages=include_broadcast_messages,
             full_context=full_context,
             api_call_delay=api_call_delay,
-            use_local_llm=use_local_llm,
-            local_model_name=local_model_name,
             token_tracker=token_tracker,
             llm_provider=llm_provider,
             max_agent_messages=max_agent_messages,

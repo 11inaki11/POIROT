@@ -44,3 +44,7 @@ htmlcov/
 # Benchmark results (large data)
 results/
 *.jsonl
+
+# POIROT analysis outputs
+poirot_results/
+POIROT_output/

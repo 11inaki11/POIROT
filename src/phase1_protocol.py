@@ -244,8 +244,11 @@ def execute_phase1_analysis(
     
     for agent_id, agent_data in agents.items():
         agent_name = agent_data['config'].agent_name
-        llm = agent_data['llm']
-        system_prompt = agent_data['system_prompt']
+        # In LangChain adapter mode the compiled agent is used directly;
+        # in database mode a reconstructed LLM instance is used instead.
+        compiled_agent = agent_data.get('compiled_agent')
+        llm = agent_data.get('llm')
+        system_prompt = agent_data.get('system_prompt', '')
         
         print(f"\n{'─'*80}")
         print(f"🤖 {agent_name.upper()} (ID: {agent_id}) - INDIVIDUAL ANALYSIS")
@@ -347,16 +350,24 @@ def execute_phase1_analysis(
             # Participant case: use normal protocol with cleaned messages
             protocol_msg = create_poirot_protocol_message()
             
-            # CRITICAL: Match exact message order from POIROTPhase1.py
-            # [SystemMessage] + cleaned_messages + [protocol, phase1_msg, ignore_list]
-            # cleaned_processed already contains BaseMessage objects (not ProcessedMessage)
-            context_messages = [
-                SystemMessage(content=system_prompt)
-            ] + cleaned_processed + [
-                HumanMessage(content=protocol_msg),
-                HumanMessage(content=POIROT_PHASE1_MESSAGE)
-            ]
-            
+            if compiled_agent is not None:
+                # LangChain adapter mode: the system prompt is already embedded in the
+                # compiled agent — pass only the conversation context + POIROT prompts.
+                context_messages = cleaned_processed + [
+                    HumanMessage(content=protocol_msg),
+                    HumanMessage(content=POIROT_PHASE1_MESSAGE),
+                ]
+            else:
+                # Database mode: system prompt must be injected explicitly.
+                # CRITICAL: Match exact message order from POIROTPhase1.py
+                # [SystemMessage] + cleaned_messages + [protocol, phase1_msg, ignore_list]
+                context_messages = [
+                    SystemMessage(content=system_prompt)
+                ] + cleaned_processed + [
+                    HumanMessage(content=protocol_msg),
+                    HumanMessage(content=POIROT_PHASE1_MESSAGE),
+                ]
+
             # Add vectors to ignore if provided
             if vectors_to_ignore and len(vectors_to_ignore) > 0:
                 ignore_message = format_vectors_to_ignore(vectors_to_ignore)
@@ -409,44 +420,72 @@ def execute_phase1_analysis(
         
         print(f"   💾 Context saved to: {context_filename}")
         
-        # Invoke base LLM WITHOUT tools (no peer consultation in Phase 1)
         print(f"   🧠 Generating individual analysis...")
-        
-        # Use base LLM without tools - this is the KEY difference from Phase 2
-        # ── Invoke LLM with retry for transient API errors ──────────────────────
+
         _MAX_LLM_RETRIES = max_llm_retries
         _LLM_RETRY_DELAY_503 = retry_delay_503
         _LLM_RETRY_DELAY_429 = retry_delay_429
         _llm_attempts = 0
         response = None
-        while True:
-            try:
-                if api_call_delay > 0:
-                    time.sleep(api_call_delay)
-                response = llm.invoke(context_messages)
-                break  # ✅ successful call
-            except Exception as _llm_exc:
-                _estr = str(_llm_exc)
-                _is_503 = 'UNAVAILABLE' in _estr or '503' in _estr
-                _is_429 = 'RESOURCE_EXHAUSTED' in _estr or '429' in _estr
-                if (_is_503 or _is_429) and _llm_attempts < _MAX_LLM_RETRIES:
-                    _llm_attempts += 1
-                    _code = '503 UNAVAILABLE' if _is_503 else '429 RESOURCE_EXHAUSTED'
-                    _wait = _LLM_RETRY_DELAY_503 if _is_503 else _LLM_RETRY_DELAY_429
-                    print(f"\n⚠️  Transient LLM error ({_code}).")
-                    print(f"⏳ Pausing {_wait}s before retry "
-                          f"({_llm_attempts}/{_MAX_LLM_RETRIES})...")
-                    time.sleep(_wait)
-                    print(f"🔄 Retrying LLM call...")
-                else:
-                    raise
-        # ────────────────────────────────────────────────────────────────────────
 
-        # Track tokens using centralized tracker
+        if compiled_agent is not None:
+            # ── LangChain adapter mode: invoke the original compiled agent ─────
+            # The agent already carries its LLM, system prompt, and tools.
+            # We pass only the session context + POIROT protocol messages.
+            while True:
+                try:
+                    if api_call_delay > 0:
+                        time.sleep(api_call_delay)
+                    result = compiled_agent.invoke({"messages": context_messages})
+                    # Extract the last AIMessage produced by the agent
+                    result_msgs = result.get("messages", [])
+                    response = next(
+                        (m for m in reversed(result_msgs) if isinstance(m, AIMessage)),
+                        None,
+                    )
+                    break
+                except Exception as _exc:
+                    _estr = str(_exc)
+                    _is_503 = 'UNAVAILABLE' in _estr or '503' in _estr
+                    _is_429 = 'RESOURCE_EXHAUSTED' in _estr or '429' in _estr
+                    if (_is_503 or _is_429) and _llm_attempts < _MAX_LLM_RETRIES:
+                        _llm_attempts += 1
+                        _code = '503 UNAVAILABLE' if _is_503 else '429 RESOURCE_EXHAUSTED'
+                        _wait = _LLM_RETRY_DELAY_503 if _is_503 else _LLM_RETRY_DELAY_429
+                        print(f"\n⚠️  Transient LLM error ({_code}).")
+                        print(f"⏳ Pausing {_wait}s before retry ({_llm_attempts}/{_MAX_LLM_RETRIES})...")
+                        time.sleep(_wait)
+                        print(f"🔄 Retrying...")
+                    else:
+                        raise
+        else:
+            # ── Database mode: invoke the reconstructed LLM directly ──────────
+            while True:
+                try:
+                    if api_call_delay > 0:
+                        time.sleep(api_call_delay)
+                    response = llm.invoke(context_messages)
+                    break
+                except Exception as _llm_exc:
+                    _estr = str(_llm_exc)
+                    _is_503 = 'UNAVAILABLE' in _estr or '503' in _estr
+                    _is_429 = 'RESOURCE_EXHAUSTED' in _estr or '429' in _estr
+                    if (_is_503 or _is_429) and _llm_attempts < _MAX_LLM_RETRIES:
+                        _llm_attempts += 1
+                        _code = '503 UNAVAILABLE' if _is_503 else '429 RESOURCE_EXHAUSTED'
+                        _wait = _LLM_RETRY_DELAY_503 if _is_503 else _LLM_RETRY_DELAY_429
+                        print(f"\n⚠️  Transient LLM error ({_code}).")
+                        print(f"⏳ Pausing {_wait}s before retry ({_llm_attempts}/{_MAX_LLM_RETRIES})...")
+                        time.sleep(_wait)
+                        print(f"🔄 Retrying LLM call...")
+                    else:
+                        raise
+
+        # Track tokens (database mode only — compiled agent does not expose usage here)
         input_tokens = 0
         output_tokens = 0
         total_tokens = 0
-        if token_tracker is not None and extract_tokens_from_response is not None:
+        if compiled_agent is None and token_tracker is not None and extract_tokens_from_response is not None:
             usage = extract_tokens_from_response(response)
             token_tracker.add(usage)
             input_tokens = usage.input_tokens
@@ -454,12 +493,13 @@ def execute_phase1_analysis(
             total_tokens = usage.total_tokens
             print(f"   📊 Tokens: {usage.total_tokens} (in: {usage.input_tokens}, out: {usage.output_tokens})")
 
-        # Handle potential list content (multimodal response edge case)
-        if hasattr(response, 'content') and isinstance(response.content, list):
+        # Extract text content from response (handles multimodal edge cases)
+        if response is None:
+            content_str = ""
+        elif hasattr(response, 'content') and isinstance(response.content, list):
             parts = []
             for part in response.content:
                 if isinstance(part, dict):
-                    # Extract only 'text' field from dict, ignore 'extras' with signature
                     if 'type' in part and part['type'] == 'text' and 'text' in part:
                         parts.append(part['text'])
                     elif 'text' in part:

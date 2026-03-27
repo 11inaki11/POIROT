@@ -33,7 +33,7 @@ How you provide that data depends on how your system is built. POIROT supports m
 | Integration | When to use |
 | ----------- | ----------- |
 | [SQLite database](integrations/database.md) | Any system, any language, maximum control |
-| LangChain agents | *(coming soon)* |
+| [LangChain agents](integrations/langchain.md) | Systems built with LangChain / LangGraph |
 
 ---
 
@@ -41,6 +41,6 @@ How you provide that data depends on how your system is built. POIROT supports m
 
 - [How it works](how-it-works.md) — The 4 phases in depth
 - [Quickstart](quickstart.md) — Run your first analysis in minutes
-- [API Reference](api-reference.md) — All `run_poirot()` parameters
-- [LLM Providers](providers.md) — Gemini, DeepSeek, Ollama, LM Studio
+- [API Reference](api-reference.md) — All parameters for both entry points
+- [LLM Providers](providers.md) — Gemini, OpenAI, DeepSeek, Ollama, LM Studio
 - [Integrations](integrations/database.md) — How to connect your system

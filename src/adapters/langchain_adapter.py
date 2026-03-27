@@ -57,22 +57,31 @@ class LangChainAgentAdapter:
     """
     Wraps a compiled LangChain agent and its message history for POIROT analysis.
 
+    The compiled agent is invoked directly in Phase 1. For Phase 2, POIROT builds
+    a new agent using the same LLM (specified via provider/model) plus the agent's
+    original tools and POIROT communication tools.
+
     Attributes:
-        agent: Compiled LangGraph graph (e.g. from create_react_agent).
-        messages: Message history from agent.invoke()["messages"].
-        agent_id: Unique identifier. Derived from agent_name if not given.
+        agent:     Compiled LangGraph graph (e.g. from create_react_agent).
+        messages:  Message history produced by the agent during the session.
+        agent_id:  Unique identifier. Derived from agent_name if not given.
         agent_name: Human-readable name. Auto-generated ("Agent 1", ...) if not given.
-        system_prompt: Agent's system prompt (optional).
         agent_type: Agent category string (default: "agent").
-        tools: Tool list. Extracted from agent automatically if not given.
+        tools:     Tool list. Extracted from agent automatically if not given.
+        provider:  LLM provider for this agent (overrides the global default in
+                   run_poirot_from_agents). E.g. "gemini", "openai", "deepseek".
+        model:     Model name for this agent (overrides the global default).
+        api_key:   API key for this agent's provider (overrides the global default).
     """
     agent: Any
     messages: List[BaseMessage]
     agent_id: Optional[str] = None
     agent_name: Optional[str] = None
-    system_prompt: str = ""
     agent_type: str = "agent"
     tools: Optional[List[Any]] = field(default=None)
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    api_key: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -225,8 +234,8 @@ def build_session_data(
             agent_name=agent_name,
             agent_type=adapter.agent_type,
             system_name=system_name,
-            system_prompt=adapter.system_prompt,
-            llm_model="",           # model is chosen at analysis time via provider param
+            system_prompt="",       # system prompt is internal to the compiled agent
+            llm_model="",           # LLM is internal to the compiled agent
             temperature=0.0,
             max_tokens=8000,
             tools=tools_dicts,
@@ -236,7 +245,11 @@ def build_session_data(
         agents_configs[agent_id] = {
             "name": agent_name,
             "config": config,
-            "system_prompt": adapter.system_prompt,
+            "system_prompt": "",            # internal to the compiled agent
+            "compiled_agent": adapter.agent,# the original compiled graph
+            "provider": adapter.provider,   # per-agent LLM override (None = use global)
+            "model": adapter.model,         # per-agent model override (None = use global)
+            "api_key": adapter.api_key,     # per-agent API key override (None = use global)
             "tools": raw_tools,
             "tools_dict": {getattr(t, "name", str(t)): t for t in raw_tools},
             "communication_tools": [],

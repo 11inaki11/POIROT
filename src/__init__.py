@@ -236,7 +236,6 @@ def run_poirot_from_agents(
     from .adapters import build_session_data
     from .phase1_protocol import execute_phase1_analysis
     from .phase2_protocol import execute_phase2_analysis
-    from .llm_factory import LLMFactory
 
     # Validate provider
     valid_providers = set(_PROVIDER_DEFAULT_MODELS)
@@ -260,21 +259,13 @@ def run_poirot_from_agents(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    # Build session data from adapters
+    # Build session data from adapters.
+    # Each agent's compiled graph is stored in agents_configs[id]["compiled_agent"]
+    # and will be used directly in Phase 1 and Phase 2 — no new LLM instances are
+    # created for the agents themselves.
     processed_messages, historical_messages, agents_configs = build_session_data(
         agents, system_name=system_name
     )
-
-    # Add LLM instances to each agent config (required by Phase 1)
-    for agent_data in agents_configs.values():
-        agent_data["llm"] = LLMFactory.create_chat_llm(
-            model_name=model,
-            provider=provider,
-            use_local=use_local_llm,
-            local_model_name=local_model_name,
-            temperature=0,
-            num_ctx=ollama_num_ctx,
-        )
 
     # Phase 0: Build error vector space
     poirot_agent = POIROTAgent(

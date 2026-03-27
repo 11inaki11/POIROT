@@ -425,7 +425,7 @@ class POIROTPipeline:
         
         # Import session agent loader
         try:
-            from src.session_agent_loader import get_agents_for_session, validate_one_agent_per_type
+            from .session_agent_loader import get_agents_for_session, validate_one_agent_per_type
         except ImportError:
             try:
                 from session_agent_loader import get_agents_for_session, validate_one_agent_per_type

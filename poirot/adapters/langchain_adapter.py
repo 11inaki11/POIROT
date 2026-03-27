@@ -45,7 +45,7 @@ from langchain_core.messages import (
 # ---------------------------------------------------------------------------
 # Internal import — AgentConfig dataclass
 # ---------------------------------------------------------------------------
-from src.agent_factory import AgentConfig, ProcessedMessage
+from ..agent_factory import AgentConfig, ProcessedMessage
 
 
 # ---------------------------------------------------------------------------

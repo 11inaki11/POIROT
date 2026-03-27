@@ -12,7 +12,7 @@ This allows POIROT to run with different providers based on user preference,
 avoiding API rate limits and enabling offline operation when needed.
 
 Usage:
-    from src.llm_factory import LLMFactory
+    from .llm_factory import LLMFactory
     
     # For Gemini (default)
     llm = LLMFactory.create_chat_llm(model_name="gemini-2.5-flash")

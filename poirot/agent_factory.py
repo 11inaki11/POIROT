@@ -26,7 +26,7 @@ from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, ToolMe
 from langchain_core.tools import tool, StructuredTool
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from src.llm_factory import LLMFactory
+from .llm_factory import LLMFactory
 
 
 ##############################################################################

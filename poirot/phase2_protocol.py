@@ -52,7 +52,7 @@ try:
     from llm_factory import LLMFactory
 except ImportError:
     try:
-        from src.llm_factory import LLMFactory
+        from .llm_factory import LLMFactory
     except ImportError:
         print("⚠️ Could not import LLMFactory. Only Gemini API will be available.")
         LLMFactory = None
@@ -62,7 +62,7 @@ try:
     from session_agent_loader import get_agents_for_session, validate_one_agent_per_type
 except ImportError:
     try:
-        from src.session_agent_loader import get_agents_for_session, validate_one_agent_per_type
+        from .session_agent_loader import get_agents_for_session, validate_one_agent_per_type
     except ImportError:
         print("⚠️ Could not import session_agent_loader.")
         raise
@@ -72,7 +72,7 @@ try:
     from voting_system import weighted_voting_analysis
 except ImportError:
     try:
-        from src.voting_system import weighted_voting_analysis
+        from .voting_system import weighted_voting_analysis
     except ImportError:
         print("⚠️ Could not import voting_system. Voting analysis will be skipped.")
         weighted_voting_analysis = None
@@ -82,7 +82,7 @@ try:
     from token_tracker import TokenTracker, extract_tokens_from_response
 except ImportError:
     try:
-        from src.token_tracker import TokenTracker, extract_tokens_from_response
+        from .token_tracker import TokenTracker, extract_tokens_from_response
     except ImportError:
         TokenTracker = None
         extract_tokens_from_response = None

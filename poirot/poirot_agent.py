@@ -25,7 +25,7 @@ try:
     from llm_factory import LLMFactory
 except ImportError:
     try:
-        from src.llm_factory import LLMFactory
+        from .llm_factory import LLMFactory
     except ImportError:
         print("⚠️ Could not import LLMFactory. Only Gemini API will be available.")
         LLMFactory = None
@@ -35,7 +35,7 @@ try:
     from token_tracker import TokenTracker, extract_tokens_from_response
 except ImportError:
     try:
-        from src.token_tracker import TokenTracker, extract_tokens_from_response
+        from .token_tracker import TokenTracker, extract_tokens_from_response
     except ImportError:
         TokenTracker = None
         extract_tokens_from_response = None

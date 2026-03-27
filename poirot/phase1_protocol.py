@@ -27,14 +27,14 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage, AIMessage
 
-from src.agent_factory import clean_conversational_messages as _clean_conversational_messages
+from .agent_factory import clean_conversational_messages as _clean_conversational_messages
 
 # Import token tracker
 try:
     from token_tracker import TokenTracker, extract_tokens_from_response
 except ImportError:
     try:
-        from src.token_tracker import TokenTracker, extract_tokens_from_response
+        from .token_tracker import TokenTracker, extract_tokens_from_response
     except ImportError:
         TokenTracker = None
         extract_tokens_from_response = None

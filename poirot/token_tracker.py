@@ -6,7 +6,7 @@ Centralized token counting for all LLM calls in POIROT.
 Extracts token usage from Gemini API responses via LangChain's usage_metadata.
 
 Usage:
-    from src.token_tracker import TokenTracker, extract_tokens_from_response
+    from .token_tracker import TokenTracker, extract_tokens_from_response
     
     # Global tracker
     tracker = TokenTracker()

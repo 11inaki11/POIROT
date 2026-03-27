@@ -61,7 +61,15 @@ To analyze your multi-agent system, POIROT requires:
 
 ### How to Provide Data
 
-You provide this data by creating an SQLite database following the schema defined in `schema.sql`. POIROT reads this database and performs its analysis autonomously.
+POIROT is designed to work with agents of diverse nature and origin. It supports two integration approaches:
+
+#### 1. Native library agents (recommended when available)
+
+For agents built with supported frameworks such as LangChain/LangGraph, POIROT provides a direct integration path. Pass your compiled agent objects and their message histories to `run_poirot_from_agents()`. POIROT uses the actual agents as participants in the forensic analysis — it does not reconstruct or simulate them. See the [LangChain integration guide](../POIROT/docs/wiki/integrations/langchain.md) for details.
+
+#### 2. Database methodology (for custom or ad-hoc agents)
+
+For agents not built on a supported framework — whether homegrown, written in another language, or part of a proprietary system — POIROT uses an SQLite database as a universal intermediary. The developer logs all session data (messages, agent configurations, tool calls) to a SQLite file following the schema defined in `schema.sql`. POIROT reads this database and performs its analysis autonomously. This approach works with any language, any framework, and any system architecture.
 
 ---
 

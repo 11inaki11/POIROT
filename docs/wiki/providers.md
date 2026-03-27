@@ -48,6 +48,7 @@ results = poirot.run_poirot(
 
 - **Default model:** `deepseek-chat`
 - **API key env var:** `DEEPSEEK_API_KEY`
+- Get your key at [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys)
 
 ---
 

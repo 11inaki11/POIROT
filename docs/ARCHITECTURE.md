@@ -350,19 +350,26 @@ Analyze completed sessions to detect errors, track trust, and calculate metrics.
 
 ### Process
 1. Load session messages in sequence order
-2. **POIROT Phase 1**: Individual agent error detection
-   - Each agent analyzes conversation independently
-   - Generates error vector hypothesis
-3. **POIROT Phase 2**: Consensus formation
-   - Agents vote on error vector
+2. **POIROT Phase 0**: Error vector space construction
+   - The system description provided by the developer is analyzed by an LLM (the POIROTAgent)
+   - The POIROTAgent reasons about the system's architecture, the roles of each component, and the communication flow between agents
+   - From this reasoning it produces a structured **error vector space**: a finite set of named failure dimensions, each representing a distinct way the system could produce a wrong or dangerous output
+   - Examples of dimensions: `"AnalystAgent produces incorrect market signal"`, `"RiskAgent approves out-of-policy position"`, `"ExecutorAgent executes trade without risk approval"`
+   - Each dimension is a binary axis (0 = no fault, 1 = fault detected)
+   - This space is the shared coordinate system used by all subsequent phases
+3. **POIROT Phase 1**: Individual agent error detection
+   - Each agent analyzes the session conversation independently
+   - Generates an error vector hypothesis (its vote over the error space)
+4. **POIROT Phase 2**: Consensus formation
+   - Agents vote on the error vector
    - Calculate consensus using trust-weighted voting
-4. Calculate trust evolution:
+5. Calculate trust evolution:
    - Compare agent predictions to ground truth
    - Update trust scores using learning rate
-5. Calculate accuracy metrics:
+6. Calculate accuracy metrics:
    - Consensus accuracy per error dimension
    - Per-agent accuracy (exact, partial, missed)
-6. Store results
+7. Store results
 
 ### Output
 - Error vectors per agent and consensus

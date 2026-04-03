@@ -177,11 +177,11 @@ class POIROTPipeline:
             if "error_regions" in data and "system_name" in data:
                 return data
             else:
-                self._p(f"⚠️  Warning: Existing error space file has invalid structure")
+                self._p(f"WARNING  Warning: Existing error space file has invalid structure")
                 return None
                 
         except Exception as e:
-            self._p(f"⚠️  Warning: Could not load existing error space: {e}")
+            self._p(f"WARNING  Warning: Could not load existing error space: {e}")
             return None
     
     def run_phase0_error_space_construction(
@@ -207,21 +207,21 @@ class POIROTPipeline:
         if not force_rerun:
             existing = self._load_existing_error_space()
             if existing:
-                self._p(f"\n✅ Using existing error vector space from cache")
+                self._p(f"\nOK Using existing error vector space from cache")
                 self._p(f"   Path: {self._get_error_space_path()}")
                 self._p(f"   Dimensions: {len(existing['error_regions'])}")
-                self._p(f"\n💡 Use force_rerun=True to regenerate")
+                self._p(f"\n Use force_rerun=True to regenerate")
                 
                 self.error_vector_space = existing
                 self.execution_metadata["phases_completed"].append("phase0_cached")
                 return existing
         
         # Initialize POIROT Agent
-        self._p(f"\n🤖 Initializing POIROT Agent ({self.llm_model})...")
+        self._p(f"\nAgent Initializing POIROT Agent ({self.llm_model})...")
         if self.use_local_llm:
-            self._p(f"   💻 Using Local LLM: {self.local_model_name or 'gpt-oss-20b'}")
+            self._p(f"    Using Local LLM: {self.local_model_name or 'gpt-oss-20b'}")
         elif self.llm_provider == "deepseek":
-            self._p(f"   🔷 Using DeepSeek API: {self.llm_model}")
+            self._p(f"   - Using DeepSeek API: {self.llm_model}")
         self.poirot_agent = POIROTAgent(
             model=self.llm_model,
             vectors_to_ignore=self.ignore_list,
@@ -232,13 +232,13 @@ class POIROTPipeline:
         )
         
         # Run analysis
-        self._p(f"🔍 Analyzing system: {self.system_name}")
+        self._p(f" Analyzing system: {self.system_name}")
         self._p(f"   Description length: {len(self.system_description)} characters")
         
         if self.ignore_list:
             self._p(f"   Ignoring {len(self.ignore_list)} components")
         
-        self._p("\n⏳ Running POIROT Agent analysis...")
+        self._p("\n... Running POIROT Agent analysis...")
         
         result = self.poirot_agent.analyze_system(
             self.system_description,
@@ -247,7 +247,7 @@ class POIROTPipeline:
         
         # Check for errors
         if "error" in result:
-            self._p(f"\n❌ ERROR: POIROT Agent analysis failed")
+            self._p(f"\nERROR ERROR: POIROT Agent analysis failed")
             self._p(f"   {result['error']}")
             if "raw" in result:
                 self._p(f"\n   Raw response (first 200 chars):")
@@ -256,22 +256,22 @@ class POIROTPipeline:
         
         # Validate result
         if "error_regions" not in result or "system_name" not in result:
-            self._p(f"\n❌ ERROR: Invalid response structure from POIROT Agent")
+            self._p(f"\nERROR ERROR: Invalid response structure from POIROT Agent")
             raise RuntimeError("Phase 0 failed: Invalid response structure")
         
         # Save result
         output_path = self._get_error_space_path()
-        self._p(f"\n💾 Saving error vector space to: {output_path}")
+        self._p(f"\nSaved Saving error vector space to: {output_path}")
         
         saved = self.poirot_agent.save_output(result, output_path)
         if not saved:
-            self._p(f"⚠️  Warning: Could not save error vector space to file")
+            self._p(f"WARNING  Warning: Could not save error vector space to file")
         
         # Store in pipeline
         self.error_vector_space = result
         
         # Print summary
-        self._p(f"\n✅ Phase 0 complete!")
+        self._p(f"\nOK Phase 0 complete!")
         self._p(f"\n   System: {result['system_name']}")
         self._p(f"   Error dimensions: {len(result['error_regions'])}")
         self._p(f"\n   Error regions identified:")
@@ -322,7 +322,7 @@ class POIROTPipeline:
             )
         
         # Initialize AgentFactory
-        self._p(f"\n🏭 Initializing Agent Factory...")
+        self._p(f"\n Initializing Agent Factory...")
         self._p(f"   Database: {self.database_path}")
         
         try:
@@ -335,22 +335,22 @@ class POIROTPipeline:
                 model_override=self.llm_model,
             )
         except Exception as e:
-            self._p(f"\n❌ ERROR: Could not initialize Agent Factory")
+            self._p(f"\nERROR ERROR: Could not initialize Agent Factory")
             self._p(f"   {e}")
             raise RuntimeError(f"Phase 1 failed: {e}")
         
         # Create all agents
-        self._p(f"\n🤖 Creating LangChain agent instances...")
+        self._p(f"\nAgent Creating LangChain agent instances...")
         
         try:
             self.agents = self.agent_factory.create_all_agents()
         except Exception as e:
-            self._p(f"\n❌ ERROR: Could not create agents")
+            self._p(f"\nERROR ERROR: Could not create agents")
             self._p(f"   {e}")
             raise RuntimeError(f"Phase 1 failed: {e}")
         
         # Print summary
-        self._p(f"\n✅ Phase 1 complete!")
+        self._p(f"\nOK Phase 1 complete!")
         self._p(f"\n   Agents created: {len(self.agents)}")
         
         for agent_id, agent_data in self.agents.items():
@@ -371,21 +371,21 @@ class POIROTPipeline:
         self.execution_metadata["phases_completed"].append("phase1_completed")
         
         # Load and process messages from database (needed for Phase 1 protocol)
-        self._p(f"\n📨 Loading session messages from database...")
+        self._p(f"\n Loading session messages from database...")
         if self.session_id:
-            self._p(f"   🎯 Target session: {self.session_id}")
+            self._p(f"    Target session: {self.session_id}")
         else:
-            self._p(f"   🎯 Target session: Most recent")
+            self._p(f"    Target session: Most recent")
         raw_messages = self._load_messages_from_database()
         if raw_messages:
             self.processed_messages = self.agent_factory.process_messages(raw_messages)
-            self._p(f"   ✅ Processed {len(self.processed_messages)} messages")
+            self._p(f"   OK Processed {len(self.processed_messages)} messages")
         else:
-            self._p(f"   ⚠️  No messages found in database")
+            self._p(f"   WARNING  No messages found in database")
             self.processed_messages = []
         
         # Save agent configurations to JSON for inspection
-        self._p(f"\n💾 Saving agent configurations to JSON...")
+        self._p(f"\nSaved Saving agent configurations to JSON...")
         self._save_agent_configurations()
         
         # Return agents dictionary for external use
@@ -433,7 +433,7 @@ class POIROTPipeline:
             try:
                 from session_agent_loader import get_agents_for_session, validate_one_agent_per_type
             except ImportError:
-                self._p("⚠️ Could not import session_agent_loader, using fallback logic")
+                self._p("WARNING Could not import session_agent_loader, using fallback logic")
                 get_agents_for_session = None
         
         # --- SMART AGENT SELECTION LOGIC ---
@@ -442,7 +442,7 @@ class POIROTPipeline:
         # 2. For missing agent types, the most frequent instance (as judges)
         
         if get_agents_for_session is not None and self.session_id:
-            self._p(f"\n🎯 Using smart agent selection for session: {self.session_id[:8]}...")
+            self._p(f"\n Using smart agent selection for session: {self.session_id[:8]}...")
             
             # Get the correct agent IDs for this session (participants + judges)
             from pathlib import Path
@@ -466,13 +466,13 @@ class POIROTPipeline:
                 if aid in selected_agent_ids
             }
             
-            self._p(f"\n👥 Smart Agent Selection Results:")
+            self._p(f"\n Smart Agent Selection Results:")
             self._p(f"   Total Agents in DB: {len(self.agents)}")
             self._p(f"   Selected for Analysis: {len(active_agents)}")
             
         else:
             # Fallback: Use old logic (only participants, no judges)
-            self._p(f"\n👥 Agent Participation Analysis (Fallback Mode):")
+            self._p(f"\n Agent Participation Analysis (Fallback Mode):")
             
             participating_agent_ids = set()
             for pm in self.processed_messages:
@@ -495,7 +495,7 @@ class POIROTPipeline:
             self._p(f"   Selected for Analysis: {len(active_agents)}")
         
         if not active_agents:
-            self._p("   ⚠️  No active agents found in this session analysis. Skipping Phase 1 Protocol.")
+            self._p("   WARNING  No active agents found in this session analysis. Skipping Phase 1 Protocol.")
             return {}
             
         # Execute Phase 1 protocol using ONLY active agents
@@ -531,7 +531,7 @@ class POIROTPipeline:
         # Mark completion
         self.execution_metadata["phases_completed"].append("phase1_protocol_completed")
         
-        self._p(f"\n✅ Phase 1 Protocol completed: {len(self.analysis_results)} agent reports generated")
+        self._p(f"\nOK Phase 1 Protocol completed: {len(self.analysis_results)} agent reports generated")
         
         return {
             "num_reports": len(self.analysis_results),
@@ -605,7 +605,7 @@ class POIROTPipeline:
         # Mark completion
         self.execution_metadata["phases_completed"].append("phase2_protocol_completed")
         
-        self._p(f"\n✅ Phase 2 Protocol completed: {len(self.phase2_votes)} agent votes collected")
+        self._p(f"\nOK Phase 2 Protocol completed: {len(self.phase2_votes)} agent votes collected")
         
         return {
             "votes": self.phase2_votes,
@@ -627,7 +627,7 @@ class POIROTPipeline:
         self._p("\n" + "=" * 80)
         self._p("PHASE 3: GRAPH BUILDER")
         self._p("=" * 80)
-        self._p("\n⚠️  Phase 3 not yet implemented")
+        self._p("\nWARNING  Phase 3 not yet implemented")
         self._p("   Coming soon: Dynamic StateGraph construction")
         
         # TODO: Implement graph builder
@@ -650,7 +650,7 @@ class POIROTPipeline:
         self._p("\n" + "=" * 80)
         self._p("PHASE 4: EXECUTION & LOGGING")
         self._p("=" * 80)
-        self._p("\n⚠️  Phase 4 not yet implemented")
+        self._p("\nWARNING  Phase 4 not yet implemented")
         self._p("   Coming soon: Multi-agent workflow execution")
         
         # TODO: Implement execution engine
@@ -673,7 +673,7 @@ class POIROTPipeline:
         self._p("\n" + "=" * 80)
         self._p("PHASE 5: POIROT ANALYSIS ENGINE")
         self._p("=" * 80)
-        self._p("\n⚠️  Phase 5 not yet implemented")
+        self._p("\nWARNING  Phase 5 not yet implemented")
         self._p("   Coming soon: POIROT Phase 1 & 2 analysis")
         
         # TODO: Implement analysis engine
@@ -689,7 +689,7 @@ class POIROTPipeline:
         self._p("\n" + "=" * 80)
         self._p("PHASE 6: VISUALIZATION")
         self._p("=" * 80)
-        self._p("\n⚠️  Phase 6 not yet implemented")
+        self._p("\nWARNING  Phase 6 not yet implemented")
         self._p("   Coming soon: Result visualization")
         
         # TODO: Implement visualizer
@@ -721,7 +721,7 @@ class POIROTPipeline:
         # Set session filter if provided
         if specific_session_id:
             self.session_id = specific_session_id
-            self._p(f"ℹ️  Filtering analysis to specific session: {specific_session_id}")
+            self._p(f"i  Filtering analysis to specific session: {specific_session_id}")
             
         self.execution_metadata["pipeline_started"] = datetime.now().isoformat()
         
@@ -750,21 +750,21 @@ class POIROTPipeline:
                 try:
                     results["phase1_agents"] = self.run_phase1_agent_factory()
                 except NotImplementedError:
-                    self._p("\n⏭️  Skipping Phase 1 (not implemented)")
+                    self._p("\nSKIP  Skipping Phase 1 (not implemented)")
             
             # Phase 1B: POIROT Phase 1 Protocol (individual analysis)
             if phases is None or "phase1_protocol" in phases:
                 try:
                     results["phase1_protocol"] = self.run_phase1_protocol()
                 except NotImplementedError:
-                    self._p("\n⏭️  Skipping Phase 1 Protocol (not implemented)")
+                    self._p("\nSKIP  Skipping Phase 1 Protocol (not implemented)")
             
             # Phase 2: POIROT Phase 2 Protocol (peer consultation)
             if phases is None or "phase2_protocol" in phases:
                 try:
                     results["phase2_protocol"] = self.run_phase2_protocol()
                 except NotImplementedError:
-                    self._p("\n⏭️  Skipping Phase 2 Protocol (not implemented)")
+                    self._p("\nSKIP  Skipping Phase 2 Protocol (not implemented)")
 
             # Mark completion
             self.execution_metadata["pipeline_completed"] = datetime.now().isoformat()
@@ -779,10 +779,10 @@ class POIROTPipeline:
             self._p("=" * 80)
             self._p(f"\nPhases completed: {len(self.execution_metadata['phases_completed'])}")
             for phase in self.execution_metadata['phases_completed']:
-                self._p(f"   ✅ {phase}")
+                self._p(f"   OK {phase}")
             
             # Print token usage
-            self._p(f"\n📊 Token Usage (Gemini API):")
+            self._p(f"\n Token Usage (Gemini API):")
             self._p(f"   Total tokens: {token_summary['total_tokens']:,}")
             self._p(f"   Input tokens: {token_summary['input_tokens']:,}")
             self._p(f"   Output tokens: {token_summary['output_tokens']:,}")
@@ -794,7 +794,7 @@ class POIROTPipeline:
             return results
             
         except Exception as e:
-            self._p(f"\n❌ PIPELINE ERROR: {e}")
+            self._p(f"\nERROR PIPELINE ERROR: {e}")
             self.execution_metadata["pipeline_error"] = str(e)
             raise
     
@@ -815,7 +815,7 @@ class POIROTPipeline:
             True if successful, False otherwise
         """
         if not self.agents:
-            self._p("   ⚠️  No agents to save")
+            self._p("   WARNING  No agents to save")
             return False
         
         output_path = os.path.join(self.output_dir, "agent_configurations.json")
@@ -869,13 +869,13 @@ class POIROTPipeline:
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(agent_configs, f, indent=2, ensure_ascii=False)
             
-            self._p(f"   ✅ Agent configurations saved to: {output_path}")
-            self._p(f"   📄 Contains: system prompts, tools, LLM configs for {len(agent_configs)} agents")
+            self._p(f"   OK Agent configurations saved to: {output_path}")
+            self._p(f"    Contains: system prompts, tools, LLM configs for {len(agent_configs)} agents")
             
             return True
             
         except Exception as e:
-            self._p(f"   ⚠️  Could not save agent configurations: {e}")
+            self._p(f"   WARNING  Could not save agent configurations: {e}")
             return False
     
     def get_error_space_summary(self) -> str:
@@ -1014,7 +1014,7 @@ class POIROTPipeline:
             return messages
             
         except Exception as e:
-            self._p(f"   ⚠️  Error loading messages: {e}")
+            self._p(f"   WARNING  Error loading messages: {e}")
             return []
     
     def _get_session_id(self) -> str:
@@ -1126,7 +1126,7 @@ class POIROTPipeline:
             return sessions
             
         except Exception as e:
-            self._p(f"⚠️  Error listing sessions: {e}")
+            self._p(f"WARNING  Error listing sessions: {e}")
             return []
     
     def print_available_sessions(self) -> None:
@@ -1134,7 +1134,7 @@ class POIROTPipeline:
         sessions = self.list_available_sessions()
         
         if not sessions:
-            self._p("\n⚠️  No sessions found in database")
+            self._p("\nWARNING  No sessions found in database")
             return
         
         self._p("\n" + "="*80)
@@ -1149,7 +1149,7 @@ class POIROTPipeline:
             if session['session_notes']:
                 self._p(f"   Notes: {session['session_notes']}")
             if session['has_ground_truth']:
-                self._p(f"   ✅ Has ground truth")
+                self._p(f"   OK Has ground truth")
             if session['execution_time_seconds']:
                 self._p(f"   Duration: {session['execution_time_seconds']:.2f}s")
             self._p()

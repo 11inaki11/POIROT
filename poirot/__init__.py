@@ -81,6 +81,7 @@ def run_poirot(
     ignore_list: Optional[List[str]] = None,
     # ── Optional — output / verbosity ──────────────────────────────────────
     verbose: bool = True,
+    debug: bool = False,
     # ── Optional — message context ─────────────────────────────────────────
     include_tool_calls: bool = False,
     include_broadcast_messages: bool = False,
@@ -189,6 +190,7 @@ def run_poirot_from_agents(
     ignore_list: Optional[List[str]] = None,
     # ── Optional — output / verbosity ──────────────────────────────────────
     verbose: bool = True,
+    debug: bool = False,
     # ── Optional — message context ─────────────────────────────────────────
     include_tool_calls: bool = False,
     include_broadcast_messages: bool = False,
@@ -327,6 +329,7 @@ def run_poirot_from_agents(
         retry_delay_429=retry_delay_429,
         api_call_delay=api_call_delay,
         verbose=verbose,
+        debug=debug,
     )
 
     phase1_reports = (
@@ -343,7 +346,7 @@ def run_poirot_from_agents(
         vectors_to_ignore=ignore_list,
         error_space=error_space,
         model_name=model,
-        output_dir=output_path / "phase2" if output_path else None,
+        output_dir=output_path,
         include_tool_calls=include_tool_calls,
         include_broadcast_messages=include_broadcast_messages,
         full_context=full_context,
@@ -359,6 +362,7 @@ def run_poirot_from_agents(
         historical_messages_override=historical_messages,
         agents_data_override=agents_configs,
         verbose=verbose,
+        debug=debug,
     )
 
     # ── Build user-friendly result ───────────────────────────────────────────
@@ -366,6 +370,8 @@ def run_poirot_from_agents(
     winning = voting_results.get("winning_location", {})
     voting_summary = voting_results.get("voting_summary", {})
     tied_locations = voting_results.get("tied_locations") or []
+    is_tie = voting_summary.get("is_tie", False)
+    tied_names = [t["name"] for t in tied_locations] if is_tie else []
 
     return {
         "system_name": system_name,
@@ -373,11 +379,13 @@ def run_poirot_from_agents(
         "error_space": error_space.get("error_regions", []),
         # Aggregated verdict
         "consensus": {
-            "faulty_component": winning.get("name", "unknown"),
+            # When tied, lists all tied component names joined by " / "
+            "faulty_component": " / ".join(tied_names) if is_tie else winning.get("name", "unknown"),
             "fault_vector": winning.get("vector", []),
             "confidence_pct": winning.get("percentage", 0.0),
-            "is_tie": voting_summary.get("is_tie", False),
-            "tied_components": [t["name"] for t in tied_locations],
+            "is_tie": is_tie,
+            # Empty list when no tie; full list of tied names when tied
+            "tied_components": tied_names,
         },
         # Per-agent final votes from Phase 2
         "agent_reports": {

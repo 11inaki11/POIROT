@@ -27,7 +27,7 @@ except ImportError:
     try:
         from .llm_factory import LLMFactory
     except ImportError:
-        _p("⚠️ Could not import LLMFactory. Only Gemini API will be available.")
+        _p("WARNING Could not import LLMFactory. Only Gemini API will be available.")
         LLMFactory = None
 
 # Import token tracker
@@ -223,7 +223,7 @@ class POIROTAgent:
         if self.token_tracker is not None and extract_tokens_from_response is not None:
             usage = extract_tokens_from_response(response)
             self.token_tracker.add(usage)
-            _p(f"   📊 Tokens used: {usage.total_tokens} (input: {usage.input_tokens}, output: {usage.output_tokens})")
+            _p(f"    Tokens used: {usage.total_tokens} (input: {usage.input_tokens}, output: {usage.output_tokens})")
 
         # The model MUST return JSON only; try to parse it
         try:

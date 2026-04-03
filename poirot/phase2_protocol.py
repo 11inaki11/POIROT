@@ -54,7 +54,7 @@ except ImportError:
     try:
         from .llm_factory import LLMFactory
     except ImportError:
-        print("⚠️ Could not import LLMFactory. Only Gemini API will be available.")
+        print("WARNING Could not import LLMFactory. Only Gemini API will be available.")
         LLMFactory = None
 
 # Import session-specific agent loader
@@ -64,7 +64,7 @@ except ImportError:
     try:
         from .session_agent_loader import get_agents_for_session, validate_one_agent_per_type
     except ImportError:
-        print("⚠️ Could not import session_agent_loader.")
+        print("WARNING Could not import session_agent_loader.")
         raise
 
 # Import voting system
@@ -74,7 +74,7 @@ except ImportError:
     try:
         from .voting_system import weighted_voting_analysis
     except ImportError:
-        print("⚠️ Could not import voting_system. Voting analysis will be skipped.")
+        print("WARNING Could not import voting_system. Voting analysis will be skipped.")
         weighted_voting_analysis = None
 
 # Import token tracker
@@ -614,7 +614,7 @@ def truncate_large_messages_if_needed(
     if total_tokens <= token_budget:
         return messages  # Nothing to do
 
-    print(f"\n  ⚠️  Context too large: ~{total_tokens:,} tokens estimated "
+    print(f"\n  WARNING  Context too large: ~{total_tokens:,} tokens estimated "
           f"(budget: {token_budget:,}). Truncating large messages…")
 
     # Work on copies to avoid mutating shared objects
@@ -643,7 +643,7 @@ def truncate_large_messages_if_needed(
         if best_idx == -1:
             # No more eligible candidates – warn and stop
             protected = sum(1 for m in messages if _is_inter_agent_message(m))
-            print(f"  ⚠️  No more truncatable messages (protected inter-agent: {protected}). "
+            print(f"  WARNING  No more truncatable messages (protected inter-agent: {protected}). "
                   f"Remaining tokens: ~{total_tokens:,}")
             break
 
@@ -664,11 +664,11 @@ def truncate_large_messages_if_needed(
 
         old_total = total_tokens
         total_tokens = sum(_est_tokens(m) for m in messages)
-        print(f"     ↳ Truncated message [{best_idx}]: "
+        print(f"     -> Truncated message [{best_idx}]: "
               f"{original_chars:,} → {kept_chars:,} chars  "
               f"(tokens: {old_total:,} → {total_tokens:,})")
 
-    print(f"  ✅ Final context size: ~{total_tokens:,} tokens")
+    print(f"  OK Final context size: ~{total_tokens:,} tokens")
     return messages
 
 
@@ -727,36 +727,36 @@ def save_agent_context_to_file(agent_id: str, context_messages: list,
             
             # Write system prompt
             if system_prompt:
-                f.write("─"*80 + "\n")
+                f.write("-"*80 + "\n")
                 f.write("SYSTEM PROMPT\n")
-                f.write("─"*80 + "\n")
+                f.write("-"*80 + "\n")
                 f.write(f"{system_prompt.content}\n\n")
             
             # Write protocol message
             if protocol_msg:
-                f.write("─"*80 + "\n")
+                f.write("-"*80 + "\n")
                 f.write("POIROT PROTOCOL MESSAGE\n")
-                f.write("─"*80 + "\n")
+                f.write("-"*80 + "\n")
                 f.write(f"{protocol_msg.content}\n\n")
             
             # Write other messages (Historical + Phase 1 + Current Conversation)
             if historical_msgs:
-                f.write("─"*80 + "\n")
+                f.write("-"*80 + "\n")
                 f.write(f"CONVERSATION CONTEXT ({len(historical_msgs)} messages)\n")
-                f.write("─"*80 + "\n\n")
+                f.write("-"*80 + "\n\n")
                 
                 for idx, msg in enumerate(historical_msgs, 1):
                     if isinstance(msg, HumanMessage):
                         icon = "👤"
                         msg_type = "HUMAN"
                     elif isinstance(msg, AIMessage):
-                        icon = "🤖"
+                        icon = "Agent"
                         msg_type = "AI"
                     elif isinstance(msg, ToolMessage):
-                        icon = "🔧"
+                        icon = ""
                         msg_type = "TOOL"
                     elif isinstance(msg, SystemMessage):
-                        icon = "⚙️"
+                        icon = "⚙"
                         msg_type = "SYSTEM"
                     else:
                         icon = "❓"
@@ -774,7 +774,7 @@ def save_agent_context_to_file(agent_id: str, context_messages: list,
                     # For AIMessages with tool calls, show the tool calls
                     if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls:
                         f.write(f"Content: {msg.content}\n\n")
-                        f.write(f"🔧 TOOL CALLS ({len(msg.tool_calls)}):\n")
+                        f.write(f" TOOL CALLS ({len(msg.tool_calls)}):\n")
                         for tc_idx, tool_call in enumerate(msg.tool_calls, 1):
                             f.write(f"  {tc_idx}. {tool_call.get('name', 'unknown_tool')}\n")
                             if 'args' in tool_call and tool_call['args']:
@@ -785,23 +785,23 @@ def save_agent_context_to_file(agent_id: str, context_messages: list,
                         # POIROT internal note: show truncation info in our log but NOT sent to the LLM
                         trunc_info = msg.additional_kwargs.get('_poirot_truncated') if hasattr(msg, 'additional_kwargs') and msg.additional_kwargs else None
                         if trunc_info:
-                            f.write(f"\n⚠️  [POIROT LOG - NOT SENT TO AGENT] Message truncated: "
+                            f.write(f"\nWARNING  [POIROT LOG - NOT SENT TO AGENT] Message truncated: "
                                     f"{trunc_info['original_chars']:,} chars → {trunc_info['kept_chars']:,} chars kept "
                                     f"({trunc_info['removed_chars']:,} chars removed to fit context budget)\n")
                         f.write("\n")
             else:
-                f.write("─"*80 + "\n")
+                f.write("-"*80 + "\n")
                 f.write("NO CONVERSATION CONTEXT\n")
-                f.write("─"*80 + "\n\n")
+                f.write("-"*80 + "\n\n")
             
             f.write("="*80 + "\n")
             f.write("END OF CONTEXT\n")
             f.write("="*80 + "\n")
             
-        print(f"  📝 Context saved to {filename}")
+        print(f"   Context saved to {filename}")
         
     except Exception as e:
-        print(f"  ⚠️ Failed to save debug context: {e}")
+        print(f"  WARNING Failed to save debug context: {e}")
 
 
 ##############################################################################
@@ -956,7 +956,7 @@ def format_phase1_observations(phase1_reports: Dict[str, str]) -> str:
     formatted += "═"*80 + "\n\n"
     
     for agent_id, report in phase1_reports.items():
-        formatted += f"── {agent_id.upper()} ──\n"
+        formatted += f"-- {agent_id.upper()} --\n"
         formatted += f"{report}\n\n"
     
     formatted += "═"*80 + "\n"
@@ -978,15 +978,15 @@ def format_vectors_to_ignore(vectors: List[str]) -> str:
     if not vectors or len(vectors) == 0:
         return ""
     
-    formatted = "\n" + "─"*80 + "\n"
-    formatted += "⚠️  KNOWN NON-ISSUES - DO NOT REPORT THESE AS HAZARD VECTORS\n"
-    formatted += "─"*80 + "\n"
+    formatted = "\n" + "-"*80 + "\n"
+    formatted += "WARNING  KNOWN NON-ISSUES - DO NOT REPORT THESE AS HAZARD VECTORS\n"
+    formatted += "-"*80 + "\n"
     formatted += "The following aspects are KNOWN to be correct and should NOT be reported:\n\n"
     
     for i, vector in enumerate(vectors, 1):
         formatted += f"{i}. {vector}\n"
     
-    formatted += "\n" + "─"*80 + "\n"
+    formatted += "\n" + "-"*80 + "\n"
     formatted += "Focus your analysis on genuine anomalies, not these known characteristics.\n"
     
     return formatted
@@ -1090,6 +1090,7 @@ def create_agent_nodes(
     retry_delay_503: int = 30,
     retry_delay_429: int = 60,
     token_budget: int = 95_000,
+    debug: bool = False,
 ):
     """
     Factory function to create LangGraph nodes for a single agent.
@@ -1184,16 +1185,16 @@ def create_agent_nodes(
         )
         
         print(f"\n{'='*80}")
-        print(f"🤖 AGENT: {agent_data['name']} ({agent_id})")
+        print(f"Agent AGENT: {agent_data['name']} ({agent_id})")
         print(f"{'='*80}")
         print(f"Total messages: {len(all_messages)}")
         print(f"Filtered for {agent_id}: {len(filtered)}")
         print(f"Consulted: {consulted}, Call count: {call_count + 1}/{max_agent_messages}")
 
         if will_reach_limit:
-            print(f"⚠️  MESSAGE LIMIT WILL BE REACHED ({call_count + 1}/{max_agent_messages})")
+            print(f"WARNING  MESSAGE LIMIT WILL BE REACHED ({call_count + 1}/{max_agent_messages})")
             if force_final_vote:
-                print(f"🚨 FORCING FINAL VOTE - This is the last message allowed!")
+                print(f"ALERT FORCING FINAL VOTE - This is the last message allowed!")
         
         # Trim oversized messages (e.g. large data dumps) to stay within token budget
         filtered = truncate_large_messages_if_needed(filtered, token_budget=token_budget)
@@ -1240,7 +1241,7 @@ In this phase, your job is to be a CRITICAL EVALUATOR of the system's failure.
             
             # Different message based on whether we're forcing due to limit
             if force_final_vote:
-                final_request = f"""🚨 POIROT PROTOCOL ENFORCEMENT 🚨
+                final_request = f"""ALERT POIROT PROTOCOL ENFORCEMENT ALERT
 
 You have reached the maximum number of messages allowed ({max_agent_messages}). The POIROT protocol 
 requires you to provide your final vote NOW to prevent infinite loops and control resource usage.
@@ -1273,13 +1274,15 @@ Your response MUST be a valid JSON object with the following structure:
 CRITICAL: The "location" field must be a BINARY VECTOR (array of 0s and 1s), NOT a text description."""
             messages.append(HumanMessage(content=final_request))
         
-        # DEBUG: Save context to file if output_dir is provided
-        if output_dir:
+        # Save context to debug/ folder only when debug=True
+        if debug and output_dir:
+            debug_dir = output_dir / "debug"
+            debug_dir.mkdir(parents=True, exist_ok=True)
             save_agent_context_to_file(
                 agent_id=agent_id,
                 context_messages=messages,
                 total_messages=len(all_messages),
-                output_dir=output_dir,
+                output_dir=debug_dir,
                 call_number=call_counter[0]
             )
 
@@ -1287,7 +1290,7 @@ CRITICAL: The "location" field must be a BINARY VECTOR (array of 0s and 1s), NOT
         if api_call_delay > 0:
             time.sleep(api_call_delay)
 
-        # ── Invoke LLM with retry for transient API errors ──────────────────────
+        # -- Invoke LLM with retry for transient API errors ----------------------
         # Handles: 503 UNAVAILABLE (high demand) and 429 RESOURCE_EXHAUSTED (rate limit)
         _MAX_LLM_RETRIES = max_llm_retries
         _LLM_RETRY_DELAY_503 = retry_delay_503   # seconds — service temporarily unavailable
@@ -1297,7 +1300,7 @@ CRITICAL: The "location" field must be a BINARY VECTOR (array of 0s and 1s), NOT
         while True:
             try:
                 response = llm_with_tools.invoke(messages)
-                break  # ✅ successful call
+                break  # OK successful call
             except Exception as _llm_exc:
                 _estr = str(_llm_exc)
                 _is_503 = 'UNAVAILABLE' in _estr or '503' in _estr
@@ -1306,23 +1309,23 @@ CRITICAL: The "location" field must be a BINARY VECTOR (array of 0s and 1s), NOT
                     _llm_attempts += 1
                     _code = '503 UNAVAILABLE' if _is_503 else '429 RESOURCE_EXHAUSTED'
                     _wait = _LLM_RETRY_DELAY_503 if _is_503 else _LLM_RETRY_DELAY_429
-                    print(f"\n⚠️  Transient LLM error ({_code}) for {agent_data['name']}.")
-                    print(f"⏳ Pausing {_wait}s before retry "
+                    print(f"\nWARNING  Transient LLM error ({_code}) for {agent_data['name']}.")
+                    print(f"... Pausing {_wait}s before retry "
                           f"({_llm_attempts}/{_MAX_LLM_RETRIES})...")
                     time.sleep(_wait)
-                    print(f"🔄 Retrying LLM call for {agent_data['name']}...")
+                    print(f"Retry Retrying LLM call for {agent_data['name']}...")
                 else:
                     raise  # non-transient error or max retries reached
-        # ────────────────────────────────────────────────────────────────────────
+        # ------------------------------------------------------------------------
 
         # Track tokens
         if token_tracker is not None and extract_tokens_from_response is not None:
             usage = extract_tokens_from_response(response)
             token_tracker.add(usage)
         
-        print(f"\n{'─'*80}")
+        print(f"\n{'-'*80}")
         print(f"RESPONSE from {agent_data['name']}:")
-        print(f"{'─'*80}")
+        print(f"{'-'*80}")
         
         # Safe string conversion for content - handle Gemini 2.0 format
         if hasattr(response, 'content') and isinstance(response.content, list):
@@ -1346,7 +1349,7 @@ CRITICAL: The "location" field must be a BINARY VECTOR (array of 0s and 1s), NOT
             content_str = ""
             
         print(content_str)
-        print(f"{'─'*80}\n")
+        print(f"{'-'*80}\n")
         
         # Detect tool calls and final report
         has_tool_calls = bool(hasattr(response, 'tool_calls') and response.tool_calls)
@@ -1366,11 +1369,11 @@ CRITICAL: The "location" field must be a BINARY VECTOR (array of 0s and 1s), NOT
         # Set consulted=True when tool_calls detected OR when forced due to message limit
         if has_tool_calls:
             state_updates[f'{agent_id}_consulted'] = True
-            print(f"  ✅ {agent_data['name']} has consulted with peers (tool calls detected)")
+            print(f"  OK {agent_data['name']} has consulted with peers (tool calls detected)")
         elif force_final_vote:
             # If we forced final vote due to message limit, mark as consulted
             state_updates[f'{agent_id}_consulted'] = True
-            print(f"  🚨 {agent_data['name']} marked as consulted (message limit reached)")
+            print(f"  ALERT {agent_data['name']} marked as consulted (message limit reached)")
         
         # Extract vote if final report provided OR if we forced a vote
         if has_final_report or force_final_vote:
@@ -1386,18 +1389,18 @@ CRITICAL: The "location" field must be a BINARY VECTOR (array of 0s and 1s), NOT
                 state_updates[f'{agent_id}_justification'] = vote_data.get('justification', '')
                 
                 vote_type = "FORCED VOTE (limit reached)" if force_final_vote else "FINAL VOTE"
-                print(f"  ✅ {agent_data['name']} provided {vote_type}")
-                print(f"  🎯 Hazard Vector: {vote_data.get('hazard_vector')}")
-                print(f"  📍 Location: {vote_data.get('location')}")
+                print(f"  OK {agent_data['name']} provided {vote_type}")
+                print(f"   Hazard Vector: {vote_data.get('hazard_vector')}")
+                print(f"  * Location: {vote_data.get('location')}")
             else:
                 if force_final_vote:
-                    print(f"  ⚠️ Could not extract vote JSON from forced response (JSON malformed)")
+                    print(f"  WARNING Could not extract vote JSON from forced response (JSON malformed)")
                     # For forced votes, we still need to set some data to prevent further loops
                     state_updates[f'{agent_id}_hazard_vector'] = "Error extracting forced vote - loop detected"
                     state_updates[f'{agent_id}_hazard_location'] = []
                     state_updates[f'{agent_id}_justification'] = f"Agent reached message limit ({max_agent_messages}), vote extraction failed"
                 else:
-                    print(f"  ⚠️ Could not extract vote JSON from response (JSON malformed)")
+                    print(f"  WARNING Could not extract vote JSON from response (JSON malformed)")
                     state_updates[f'{agent_id}_hazard_vector'] = "Error extracting vote"
                     state_updates[f'{agent_id}_hazard_location'] = []
                     state_updates[f'{agent_id}_justification'] = ""
@@ -1417,41 +1420,41 @@ CRITICAL: The "location" field must be a BINARY VECTOR (array of 0s and 1s), NOT
         tool_calls = state['messages'][-1].tool_calls
         results = []
         
-        print(f"\n{'🔧'*40}")
+        print(f"\n{''*40}")
         print(f"{agent_data['name'].upper()} EXECUTING TOOLS")
-        print(f"{'🔧'*40}")
+        print(f"{''*40}")
         
         # Track which agents this agent wants to consult (POIROTMini pattern)
         consultation_flags = {}
         
         for idx, t in enumerate(tool_calls, 1):
-            print(f"\n📌 Tool {idx}/{len(tool_calls)}: {t['name']}")
+            print(f"\n* Tool {idx}/{len(tool_calls)}: {t['name']}")
             
             if t['name'] not in tools_dict:
-                print(f"   ❌ ERROR: Tool does not exist")
+                print(f"   ERROR ERROR: Tool does not exist")
                 result = "Incorrect tool name. Please retry with a valid communication tool."
             else:
                 # Extract message argument
                 tool_input = t['args'].get('message', '')
-                print(f"   💬 Message: {tool_input}")
+                print(f"    Message: {tool_input}")
                 
                 # Execute tool (sets flags in tool_factory)
                 result = tools_dict[t['name']].invoke(tool_input)
-                print(f"   ✅ {result}")
+                print(f"   OK {result}")
                 
                 # Set talk_to_{target} flag (matches POIROTMini pattern)
                 if t['name'].startswith('talk_to_'):
                     target_agent = t['name'].replace('talk_to_', '')
                     consultation_flags[f'talk_to_{target_agent}'] = True
-                    print(f"   🚩 Set flag: talk_to_{target_agent} = True")
+                    print(f"   ! Set flag: talk_to_{target_agent} = True")
             
             # Create tool result message
             tool_msg = ToolMessage(tool_call_id=t['id'], name=t['name'], content=str(result))
             add_message_metadata(tool_msg, from_node=f"tool_{t['name']}", to_node=agent_id)
             results.append(tool_msg)
         
-        print(f"\n✅ All tools executed.")
-        print(f"{'🔧'*40}\n")
+        print(f"\nOK All tools executed.")
+        print(f"{''*40}\n")
         
         return {
             'messages': results,
@@ -1519,7 +1522,7 @@ def create_poirot_server_node(
         processes them, then sets consulted=True and resets talk_to_ flags.
         """
         print(f"\n{'='*80}")
-        print("🌐 POIROT SERVER - MEDIATING COMMUNICATIONS")
+        print(" POIROT SERVER - MEDIATING COMMUNICATIONS")
         print(f"{'='*80}\n")
         
         if not tool_factory.has_pending_messages():
@@ -1542,20 +1545,20 @@ def create_poirot_server_node(
             if not message_content or not sender_id:
                 continue
             
-            print(f"{'💬'*40}")
+            print(f"{''*40}")
             print(f"CONSULTATION FROM: {agents_data.get(sender_id, {}).get('name', sender_id)} ({sender_id})")
             print(f"CONSULTATION TO: {agents_data[target_id]['name']} ({target_id})")
-            print(f"{'💬'*40}")
+            print(f"{''*40}")
             
             # Filter messages for target agent
             filtered = filter_messages_for_agent(all_messages, target_id)
             filtered = clean_historical_messages(filtered, current_agent_id=target_id)
             
-            print(f"  📊 Context for {target_id}: {len(filtered)} messages")
-            print(f"\n📥 QUERY:")
-            print(f"{'─'*80}")
+            print(f"   Context for {target_id}: {len(filtered)} messages")
+            print(f"\n QUERY:")
+            print(f"{'-'*80}")
             print(message_content)
-            print(f"{'─'*80}\n")
+            print(f"{'-'*80}\n")
             
             # Build consultation context
             protocol = create_phase2_protocol_message(error_space)
@@ -1625,8 +1628,8 @@ def create_poirot_server_node(
                     break  # Valid response
                 else:
                     retry_count += 1
-                    print(f"  ⚠️ EMPTY RESPONSE (Attempt {retry_count}/{MAX_RETRIES})")
-                    print(f"     🔄 Retrying with insistence...")
+                    print(f"  WARNING EMPTY RESPONSE (Attempt {retry_count}/{MAX_RETRIES})")
+                    print(f"     Retry Retrying with insistence...")
                     
                     insistence = HumanMessage(
                         content="CRITICAL: Your previous response was empty. You MUST provide a substantive answer. If you don't have information, explain what you observed. An empty response is NOT acceptable."
@@ -1670,10 +1673,10 @@ def create_poirot_server_node(
             prefixed_content = f"Response from {target_name}:\n{response_content}"
             response.content = prefixed_content
             
-            print(f"\n📤 RESPONSE from {agents_data[target_id]['name']}:")
-            print(f"{'─'*80}")
+            print(f"\n RESPONSE from {agents_data[target_id]['name']}:")
+            print(f"{'-'*80}")
             print(prefixed_content)
-            print(f"{'─'*80}\n")
+            print(f"{'-'*80}\n")
             
             # Add metadata for proper routing - use actual sender_id so filtering works
             add_message_metadata(response, from_node=target_id, to_node=sender_id)
@@ -1682,7 +1685,7 @@ def create_poirot_server_node(
             # Clear flag
             tool_factory.clear_flag(target_id)
         
-        print(f"✅ All pending consultations processed.")
+        print(f"OK All pending consultations processed.")
         print(f"{'='*80}\n")
         
         # Build return state
@@ -1738,14 +1741,14 @@ def create_routing_functions(agent_id: str, tool_factory: CommunicationToolFacto
         # CRITICAL: Only move to next agent when we have a final report
         # If limit reached without final report, continue to force vote
         if has_final or has_json:
-            print(f"  ✅ {agent_id} provided final vote - routing to next_agent")
+            print(f"  OK {agent_id} provided final vote - routing to next_agent")
             return "next_agent"
         elif has_tool_calls and not message_limit_reached:
             # Allow tool calls only if not at limit
             return "tools"
         elif message_limit_reached:
             # At limit but no final report - continue to force the vote
-            print(f"  🚨 {agent_id} at message limit but no vote yet - forcing vote")
+            print(f"  ALERT {agent_id} at message limit but no vote yet - forcing vote")
             return "continue"
         else:
             return "continue"
@@ -1762,7 +1765,7 @@ def create_routing_functions(agent_id: str, tool_factory: CommunicationToolFacto
         has_pending = tool_factory.has_pending_messages()
         
         if has_final:
-            print(f"  ✅ {agent_id} provided final vote after tools - routing to next_agent")
+            print(f"  OK {agent_id} provided final vote after tools - routing to next_agent")
             return "next_agent"
         elif has_pending:
             return "poirot_server"
@@ -1809,7 +1812,7 @@ def create_global_router(agent_order: List[str]):
             has_final_report = agent_states.get(f'{agent_id}_final_report', False)
             
             if has_final_report:
-                print(f"  ⏭️  Skipping {agent_id} - already provided final report")
+                print(f"  SKIP  Skipping {agent_id} - already provided final report")
                 current_index[0] += 1
                 attempts += 1
                 continue
@@ -1856,6 +1859,8 @@ def execute_phase2_analysis(
     # Agentless bypass — when provided, skip internal DB reads entirely
     historical_messages_override: Optional[List[BaseMessage]] = None,
     agents_data_override: Optional[Dict[str, Any]] = None,
+    verbose: bool = True,
+    debug: bool = False,
 ) -> Dict[str, Any]:
     """
     Execute POIROT Phase 2: Peer Consultation Protocol.
@@ -1884,19 +1889,19 @@ def execute_phase2_analysis(
         - state: Final LangGraph state
         - output_files: List of created output file paths
     """
+    _p = print if verbose else (lambda *a, **kw: None)
+
     _p(f"\n{'='*80}")
     _p("POIROT PHASE 2: PEER CONSULTATION PROTOCOL")
     _p(f"{'='*80}")
     _p(f"Session ID: {session_id}")
     _p(f"Database: {db_path}")
     _p(f"Model: {model_name}")
-    
+
     # Set output directory
-    if output_dir is None:
-        output_dir = Path("POIROT_output") / "phase2" / f"session_{session_id}"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    _p(f"Output directory: {output_dir}")
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        _p(f"Output directory: {output_dir}")
     _p(f"{'='*80}\n")
     
     # ═══════════════════════════════════════════════════════════════════════
@@ -1905,11 +1910,11 @@ def execute_phase2_analysis(
     # skip the database query entirely.
     # ═══════════════════════════════════════════════════════════════════════
     if agents_data_override is not None:
-        _p("📚 STEP 1: Using pre-built agent data (agentless mode)...")
+        _p(" STEP 1: Using pre-built agent data (agentless mode)...")
         agents_data = agents_data_override
         agent_order = list(agents_data_override.keys())
     else:
-        _p("📚 STEP 1: Loading agents from database...")
+        _p(" STEP 1: Loading agents from database...")
         agents_data, agent_order = get_agents_for_session(
             db_path=str(db_path),
             session_id=session_id
@@ -1927,10 +1932,10 @@ def execute_phase2_analysis(
     # mode) skip the database query entirely.
     # ═══════════════════════════════════════════════════════════════════════
     if historical_messages_override is not None:
-        _p("📜 STEP 2: Using pre-built historical messages (agentless mode)...")
+        _p(" STEP 2: Using pre-built historical messages (agentless mode)...")
         historical_messages = historical_messages_override
     else:
-        _p("📜 STEP 2: Loading historical messages from database...")
+        _p(" STEP 2: Loading historical messages from database...")
 
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -1972,13 +1977,13 @@ def execute_phase2_analysis(
 
         conn.close()
 
-    _p(f"  ✅ Loaded {len(historical_messages)} historical messages")
+    _p(f"  OK Loaded {len(historical_messages)} historical messages")
     _p()
     
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 3: Create communication tools for each agent
     # ═══════════════════════════════════════════════════════════════════════
-    _p("🔧 STEP 3: Creating communication tools...")
+    _p(" STEP 3: Creating communication tools...")
     
     tool_factory = CommunicationToolFactory()
     agent_tools = {}  # {agent_id: [tool1, tool2, ...]}
@@ -1992,7 +1997,7 @@ def execute_phase2_analysis(
         if not targets:
             # Allow communication with all other agents (except self)
             targets = [aid for aid in agents_data.keys() if aid != agent_id]
-            _p(f"  ℹ️  {agent_data['name']}: No communication targets defined, enabling ALL peers")
+            _p(f"  i  {agent_data['name']}: No communication targets defined, enabling ALL peers")
         
         for target_id in targets:
             if target_id in agents_data and target_id != agent_id:
@@ -2002,14 +2007,14 @@ def execute_phase2_analysis(
         agent_tools[agent_id] = tools
         
         tool_names = [t.name for t in tools]
-        _p(f"  ✅ {agent_data['name']}: {len(tools)} tools ({', '.join(tool_names) if tool_names else 'none'})")
+        _p(f"  OK {agent_data['name']}: {len(tools)} tools ({', '.join(tool_names) if tool_names else 'none'})")
     
     _p()
     
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 4: Create agent nodes for LangGraph
     # ═══════════════════════════════════════════════════════════════════════
-    _p("🏗️  STEP 4: Creating LangGraph nodes...")
+    _p("  STEP 4: Creating LangGraph nodes...")
     
     agent_nodes = {}  # {agent_id: {'call_llm': fn, 'take_action': fn, 'tools_dict': dict}}
     
@@ -2036,6 +2041,7 @@ def execute_phase2_analysis(
             retry_delay_503=retry_delay_503,
             retry_delay_429=retry_delay_429,
             token_budget=token_budget,
+            debug=debug,
         )
 
         agent_nodes[agent_id] = {
@@ -2044,14 +2050,14 @@ def execute_phase2_analysis(
             'tools_dict': tools_dict
         }
         
-        _p(f"  ✅ Created nodes for {agent_data['name']}")
+        _p(f"  OK Created nodes for {agent_data['name']}")
     
     _p()
     
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 5: Create POIROT server and routing functions
     # ═══════════════════════════════════════════════════════════════════════
-    _p("🌐 STEP 5: Creating POIROT server and routing...")
+    _p(" STEP 5: Creating POIROT server and routing...")
     
     poirot_server = create_poirot_server_node(
         agents_data=agents_data,
@@ -2075,14 +2081,14 @@ def execute_phase2_analysis(
             'route_after_tools': route_tools
         }
     
-    _p(f"  ✅ POIROT server created")
-    _p(f"  ✅ Routing functions created for {len(agent_routers)} agents")
+    _p(f"  OK POIROT server created")
+    _p(f"  OK Routing functions created for {len(agent_routers)} agents")
     _p()
     
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 6: Build LangGraph StateGraph
     # ═══════════════════════════════════════════════════════════════════════
-    _p("🏗️  STEP 6: Building LangGraph StateGraph...")
+    _p("  STEP 6: Building LangGraph StateGraph...")
     
     graph = StateGraph(Phase2State)
     
@@ -2159,7 +2165,7 @@ def execute_phase2_analysis(
     # Compile graph
     compiled_graph = graph.compile()
     
-    _p(f"  ✅ StateGraph built successfully")
+    _p(f"  OK StateGraph built successfully")
     _p(f"     - {len(agent_order)} agent nodes")
     _p(f"     - 1 POIROT server node")
     _p(f"     - Entry point: {agent_order[0]}")
@@ -2168,7 +2174,7 @@ def execute_phase2_analysis(
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 7: Initialize state and execute graph
     # ═══════════════════════════════════════════════════════════════════════
-    _p("🚀 STEP 7: Executing Phase 2 consultation process...")
+    _p(" STEP 7: Executing Phase 2 consultation process...")
     _p(f"{'='*80}\n")
     
     # Initialize state
@@ -2232,29 +2238,29 @@ def execute_phase2_analysis(
                 if rate_limit_retry_count < max_rate_limit_retries:
                     _code   = '429 RESOURCE_EXHAUSTED' if _is_rate_limit else '503 UNAVAILABLE'
                     _wait   = rate_limit_wait_seconds if _is_rate_limit else 30
-                    _p(f"\n⚠️  Transient API error reached graph level ({_code})")
-                    _p(f"⏳ Waiting {_wait}s before retry "
+                    _p(f"\nWARNING  Transient API error reached graph level ({_code})")
+                    _p(f"... Waiting {_wait}s before retry "
                           f"({rate_limit_retry_count}/{max_rate_limit_retries})...")
                     time.sleep(_wait)
-                    _p("🔄 Resuming graph execution...")
+                    _p("Retry Resuming graph execution...")
                 else:
-                    _p(f"\n❌ Max retries ({max_rate_limit_retries}) exceeded. Proceeding with partial results...")
+                    _p(f"\nERROR Max retries ({max_rate_limit_retries}) exceeded. Proceeding with partial results...")
                     execution_complete = True
             else:
                 # Other error (e.g., recursion limit)
-                _p(f"\n⚠️  Graph execution interrupted (likely recursion limit): {e}")
-                _p("⚠️  Proceeding with partial results...")
+                _p(f"\nWARNING  Graph execution interrupted (likely recursion limit): {e}")
+                _p("WARNING  Proceeding with partial results...")
                 execution_complete = True  # Exit loop
                 # We continue with whatever final_state we have accumulated
     
     _p(f"\n{'='*80}")
-    _p("✅ Phase 2 consultation completed successfully")
+    _p("OK Phase 2 consultation completed successfully")
     _p(f"{'='*80}\n")
     
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 8: Extract votes and save outputs
     # ═══════════════════════════════════════════════════════════════════════
-    _p("💾 STEP 8: Extracting votes and saving outputs...")
+    _p("Saved STEP 8: Extracting votes and saving outputs...")
     
     votes = {}
     output_files = []
@@ -2272,68 +2278,25 @@ def execute_phase2_analysis(
             'justification': justification
         }
         
-        _p(f"\n  📋 {agents_data[agent_id]['name']} ({agent_id}):")
+        _p(f"\n   {agents_data[agent_id]['name']} ({agent_id}):")
         _p(f"     Hazard Vector: {hazard_vector}")
         _p(f"     Location: {location}")
         _p(f"     Justification: {justification}")
     
-    # Save votes JSON
-    votes_file = output_dir / "phase2_votes.json"
-    with open(votes_file, 'w', encoding='utf-8') as f:
-        json.dump(votes, f, indent=2, ensure_ascii=False)
-    output_files.append(votes_file)
-    _p(f"\n  ✅ Saved votes to: {votes_file}")
-    
-    # Save full state JSON
-    state_file = output_dir / "phase2_state.json"
-    state_serializable = {
-        'session_id': final_state.get('session_id'),
-        'votes': votes,
-        'agent_tracking': {
-            agent_id: {
-                'consulted': final_state.get(f'{agent_id}_consulted', False),
-                'final_report': final_state.get(f'{agent_id}_final_report', False),
-                'call_count': final_state.get(f'{agent_id}_call_count', 0)
-            }
-            for agent_id in agent_order
-        }
-    }
-    
-    with open(state_file, 'w', encoding='utf-8') as f:
-        json.dump(state_serializable, f, indent=2, ensure_ascii=False)
-    output_files.append(state_file)
-    _p(f"  ✅ Saved state to: {state_file}")
-    
-    # Save summary report
-    summary_file = output_dir / "phase2_summary.txt"
-    with open(summary_file, 'w', encoding='utf-8') as f:
-        f.write("═"*80 + "\n")
-        f.write("POIROT PHASE 2: PEER CONSULTATION SUMMARY\n")
-        f.write("═"*80 + "\n\n")
-        f.write(f"Session ID: {session_id}\n")
-        f.write(f"Database: {db_path}\n")
-        f.write(f"Agents Consulted: {len(votes)}\n\n")
-        
-        f.write("─"*80 + "\n")
-        f.write("HAZARD VECTOR VOTES\n")
-        f.write("─"*80 + "\n\n")
-        
-        for agent_id, vote_data in votes.items():
-            f.write(f"Agent: {vote_data['agent_name']} ({agent_id})\n")
-            f.write(f"Hazard Vector: {vote_data['hazard_vector']}\n")
-            f.write(f"Location: {vote_data['location']}\n")
-            f.write(f"Justification:\n{vote_data['justification']}\n")
-            f.write("\n" + "─"*80 + "\n\n")
-    
-    output_files.append(summary_file)
-    _p(f"  ✅ Saved summary to: {summary_file}")
+    # Save votes.json and summary.txt at output_dir root
+    if output_dir is not None:
+        votes_file = output_dir / "votes.json"
+        with open(votes_file, 'w', encoding='utf-8') as f:
+            json.dump(votes, f, indent=2, ensure_ascii=False)
+        output_files.append(votes_file)
+        _p(f"\n  Saved votes to: votes.json")
     
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 9: Perform Weighted Voting Analysis
     # ═══════════════════════════════════════════════════════════════════════
     voting_results = None
     if weighted_voting_analysis and error_space:
-        _p("\n🗳️ STEP 9: Performing Weighted Voting Analysis...")
+        _p("\n STEP 9: Performing Weighted Voting Analysis...")
         
         # Prepare agent_outputs list
         agent_outputs = []
@@ -2356,19 +2319,43 @@ def execute_phase2_analysis(
         try:
             voting_results = weighted_voting_analysis(agent_outputs, poirot_preanalysis)
             
-            # Save results
-            voting_file = output_dir / "phase2_voting_results.json"
-            with open(voting_file, 'w', encoding='utf-8') as f:
-                json.dump(voting_results, f, indent=2, ensure_ascii=False)
-            output_files.append(voting_file)
-            _p(f"  ✅ Saved voting analysis to: {voting_file}")
+            # Write summary.txt at output_dir root
+            if output_dir is not None:
+                winner = voting_results.get('winning_location', {})
+                voting_summary_data = voting_results.get('voting_summary', {})
+                summary_file = output_dir / "summary.txt"
+                is_tie = voting_summary_data.get('is_tie', False)
+                tied_locs = voting_results.get('tied_locations') or []
+                tied_names = [t['name'] for t in tied_locs] if is_tie else []
+                faulty = " / ".join(tied_names) if is_tie else winner.get('name', 'unknown')
+                with open(summary_file, 'w', encoding='utf-8') as f:
+                    f.write("=" * 80 + "\n")
+                    f.write("POIROT ANALYSIS SUMMARY\n")
+                    f.write("=" * 80 + "\n\n")
+                    f.write(f"Result           : {'TIE' if is_tie else 'CONSENSUS'}\n")
+                    f.write(f"Faulty component : {faulty}\n")
+                    if is_tie:
+                        for name in tied_names:
+                            f.write(f"                   - {name}\n")
+                    f.write(f"Fault vector     : {winner.get('vector', [])}\n")
+                    f.write(f"Confidence       : {winner.get('percentage', 0.0):.1f}%\n")
+                    f.write("\n" + "-" * 80 + "\n")
+                    f.write("AGENT VOTES\n")
+                    f.write("-" * 80 + "\n\n")
+                    for aid, vote_data in votes.items():
+                        f.write(f"Agent      : {vote_data['agent_name']}\n")
+                        f.write(f"Vote       : {vote_data['location']}\n")
+                        f.write(f"Justification:\n{vote_data['justification']}\n")
+                        f.write("\n" + "-" * 80 + "\n\n")
+                output_files.append(summary_file)
+                _p(f"  Saved summary to: summary.txt")
             
             # Print detailed summary (POIROTMini style)
             if 'winning_location' in voting_results:
                 winner = voting_results['winning_location']
                 
                 _p("\n" + "="*80)
-                _p("📊 VOTING RESULTS")
+                _p(" VOTING RESULTS")
                 _p("="*80)
                 
                 # Get dimension ID safely
@@ -2376,13 +2363,13 @@ def execute_phase2_analysis(
                 error_regions = poirot_preanalysis.get('error_regions', [])
                 dim_id = error_regions[dim_idx]['id'] if 0 <= dim_idx < len(error_regions) else "?"
                 
-                _p("\n🏆 WINNING LOCATION:")
+                _p("\n WINNING LOCATION:")
                 _p(f"   Component: {winner['name']}")
                 _p(f"   Dimension: {dim_id}")
                 _p(f"   Total Score: {winner['total_score']:.4f}")
                 _p(f"   Percentage: {winner['percentage']}%")
                 
-                _p("\n📋 INDIVIDUAL AGENT VOTES:")
+                _p("\n INDIVIDUAL AGENT VOTES:")
                 
                 # Map agent IDs to readable names for display
                 agent_id_to_name = {aid: adata['name'] for aid, adata in agents_data.items()}
@@ -2392,14 +2379,14 @@ def execute_phase2_analysis(
                     agent_id = vote['agent_name']
                     display_name = agent_id_to_name.get(agent_id, agent_id)
                     
-                    _p(f"\n   🔹 {display_name}:")
+                    _p(f"\n   - {display_name}:")
                     _p(f"      Voted for: {vote['voted_location']}")
                     _p(f"      Hazard identified: {vote['hazard_vector']}")
                     _p(f"      Vote weight: {vote['vote_weight']:.4f}")
                     _p(f"      Similarity to own position: {vote['similarity_to_self']:.4f}")
                 
                 _p("\n" + "="*80)
-                _p("📈 PROBABILITY BY ERROR DIMENSION")
+                _p(" PROBABILITY BY ERROR DIMENSION")
                 _p("="*80)
                 _p("\nEach dimension represents a potential error source.")
                 _p("Probabilities show likelihood that error originated there:\n")
@@ -2420,20 +2407,20 @@ def execute_phase2_analysis(
                     bar_length = int(percentage / 2)  # 50 chars = 100%
                     bar = "█" * bar_length + "░" * (50 - bar_length)
                     
-                    _p(f"\n📍 {name} ({region_id})")
+                    _p(f"\n* {name} ({region_id})")
                     _p(f"   {bar} {percentage:.1f}%")
                     _p(f"   Weighted votes: {score:.4f}")
                 
-                _p(f"\n✓ Total probability: {total_prob:.1f}% (should be ~100%)")
+                _p(f"\nOK Total probability: {total_prob:.1f}% (should be ~100%)")
                 _p("\n" + "="*80)
             
         except Exception as e:
-            _p(f"  ❌ Error during voting analysis: {e}")
+            _p(f"  ERROR Error during voting analysis: {e}")
             import traceback
             traceback.print_exc()
 
     _p(f"\n{'='*80}")
-    _p("🎉 Phase 2 Protocol completed successfully!")
+    _p(" Phase 2 Protocol completed successfully!")
     _p(f"{'='*80}\n")
     
     # Calculate Token Usage from Final State Messages
@@ -2487,7 +2474,7 @@ def execute_phase2_analysis(
                 phase2_metadata['by_agent'][from_node]['calls'] += 1
 
     except Exception as e:
-        _p(f"⚠️ Error calculating token usage: {e}")
+        _p(f"WARNING Error calculating token usage: {e}")
 
     return {
         'votes': votes,

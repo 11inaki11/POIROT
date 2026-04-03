@@ -410,7 +410,12 @@ if __name__ == "__main__":
     print("POIROT ANALYSIS COMPLETE")
     print("=" * 60)
     c = results["consensus"]
-    print(f"\nFaulty component : {c['faulty_component']}")
+    if c["is_tie"]:
+        print(f"\nResult           : TIE")
+        print(f"Tied components  : {', '.join(c['tied_components'])}")
+    else:
+        print(f"\nResult           : CONSENSUS")
+        print(f"Faulty component : {c['faulty_component']}")
     print(f"Confidence       : {c['confidence_pct']:.1f}%")
     print(f"Fault vector     : {c['fault_vector']}")
 

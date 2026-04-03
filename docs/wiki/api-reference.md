@@ -43,6 +43,7 @@ Returns a `dict` with the full analysis results including agent votes and the fi
 | `session_id` | `str` | `None` | Specific session to analyze. If `None`, POIROT uses the most recent session in the database. |
 | `output_dir` | `str \| None` | `None` | Directory where result files are written. Created automatically if it does not exist. If `None`, no files are saved. |
 | `verbose` | `bool` | `True` | If `False`, suppress all protocol progress output to the terminal. |
+| `debug` | `bool` | `False` | If `True`, saves intermediate context files (LLM inputs per agent per call) to a `debug/` subfolder inside `output_dir`. Has no effect when `output_dir=None`. |
 | `model` | `str` | `None` | Override the default model for the selected provider. See [LLM Providers](providers.md) for defaults. |
 | `ignore_list` | `list[str]` | `None` | Component names to exclude from the error vector analysis. Useful for known non-issues. |
 
@@ -149,6 +150,7 @@ results = run_poirot_from_agents(
 | `api_key` | `str` | `None` | Default API key. Not required for `"ollama"` or `"local"` |
 | `output_dir` | `str \| None` | `None` | Directory for result files. If `None`, no files are saved. |
 | `verbose` | `bool` | `True` | If `False`, suppress all protocol progress output to the terminal. |
+| `debug` | `bool` | `False` | If `True`, saves intermediate context files to a `debug/` subfolder inside `output_dir`. |
 | `ignore_list` | `list[str]` | `None` | Component names to exclude from error vector analysis |
 | `include_tool_calls` | `bool` | `False` | Include tool call messages in context windows |
 | `include_broadcast_messages` | `bool` | `False` | Include broadcast messages in context windows |
@@ -196,11 +198,21 @@ The weighted vote aggregation — the main verdict.
 
 ```python
 c = results["consensus"]
-print(c["faulty_component"])  # "DiagnosisAgent" — component with highest vote weight
+print(c["faulty_component"])  # "DiagnosisAgent" — single winner, or "AgentA / AgentB" when tied
 print(c["fault_vector"])      # [1, 0] — binary position in the error space
 print(c["confidence_pct"])    # 72.4  — percentage of total vote weight
-print(c["is_tie"])            # False
-print(c["tied_components"])   # [] or ["AgentA", "AgentB"] when is_tie=True
+print(c["is_tie"])            # True when two or more components share the top score
+print(c["tied_components"])   # [] when no tie, ["AgentA", "AgentB"] when is_tie=True
+```
+
+When `is_tie=True`, `faulty_component` is a `/`-joined string of all tied names and `tied_components` holds each one individually. Always check `is_tie` before acting on `faulty_component`:
+
+```python
+c = results["consensus"]
+if c["is_tie"]:
+    print(f"TIE between: {', '.join(c['tied_components'])}")
+else:
+    print(f"Faulty component: {c['faulty_component']}")
 ```
 
 ### `agent_reports`
@@ -237,12 +249,41 @@ results = run_poirot_from_agents(
     api_key=os.getenv("GOOGLE_API_KEY"),
 )
 
-print(f"Faulty component: {results['consensus']['faulty_component']}")
-print(f"Confidence: {results['consensus']['confidence_pct']:.1f}%")
+c = results["consensus"]
+if c["is_tie"]:
+    print(f"TIE between: {', '.join(c['tied_components'])}")
+else:
+    print(f"Faulty component: {c['faulty_component']}")
+print(f"Confidence: {c['confidence_pct']:.1f}%")
 
 for agent_id, report in results["agent_reports"].items():
     print(f"\n{report['name']} voted: {report['vote']}")
     print(f"  Justification: {report['justification'][:120]}...")
+```
+
+---
+
+## Output files
+
+When `output_dir` is set, POIROT writes the following files:
+
+```text
+<output_dir>/
+├── summary.txt        # Human-readable verdict: result, faulty component, confidence, per-agent votes
+├── votes.json         # Machine-readable votes: one entry per agent with vector and justification
+└── phase1/
+    ├── AgentName.txt  # Phase 1 self-assessment report for each agent
+    └── ...
+```
+
+If `debug=True` is also set, an additional `debug/` folder is created:
+
+```text
+<output_dir>/
+└── debug/
+    ├── phase1_context_AgentName.json   # Exact context passed to each agent in Phase 1
+    ├── agent_id_call_1.txt             # Context passed to each agent in Phase 2, per LLM call
+    └── ...
 ```
 
 ---

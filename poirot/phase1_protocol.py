@@ -182,8 +182,8 @@ def execute_phase1_analysis(
     agent_factory,
     error_space: Optional[Dict],
     vectors_to_ignore: Optional[List[str]],
-    output_dir: Path,
-    session_name: str,
+    output_dir: Optional[Path] = None,
+    session_name: str = "",
     communication_tool_names: Optional[set] = None,
     include_tool_calls: bool = False,
     include_broadcast_messages: bool = False,
@@ -196,6 +196,7 @@ def execute_phase1_analysis(
     retry_delay_503: int = 30,
     retry_delay_429: int = 60,
     api_call_delay: float = 0.0,
+    verbose: bool = True,
 ) -> Dict[str, str]:
     """
     Execute Phase 1 of POIROT protocol: Individual Analysis.
@@ -224,19 +225,20 @@ def execute_phase1_analysis(
     Returns:
         dict: {agent_id: str (analysis report content)} - only for participating agents
     """
+    _p = print if verbose else (lambda *a, **kw: None)
     
-    print("\n" + "="*80)
-    print("🔍 POIROT PHASE 1: INDIVIDUAL ANALYSIS")
-    print("="*80)
-    print(f"Session: {session_name}")
-    print(f"Total agents: {len(agents)}")
-    print(f"Total messages: {len(processed_messages)}")
+    _p("\n" + "="*80)
+    _p("🔍 POIROT PHASE 1: INDIVIDUAL ANALYSIS")
+    _p("="*80)
+    _p(f"Session: {session_name}")
+    _p(f"Total agents: {len(agents)}")
+    _p(f"Total messages: {len(processed_messages)}")
     if vectors_to_ignore:
-        print(f"Ignore list: {len(vectors_to_ignore)} items")
-    print("─"*80)
-    print("Only PARTICIPATING agents analyze (NO peer consultation)")
-    print("Non-participants will be skipped")
-    print("="*80 + "\n")
+        _p(f"Ignore list: {len(vectors_to_ignore)} items")
+    _p("─"*80)
+    _p("Only PARTICIPATING agents analyze (NO peer consultation)")
+    _p("Non-participants will be skipped")
+    _p("="*80 + "\n")
     
     phase1_reports = {}
     phase1_metadata = {}
@@ -250,9 +252,9 @@ def execute_phase1_analysis(
         llm = agent_data.get('llm')
         system_prompt = agent_data.get('system_prompt', '')
         
-        print(f"\n{'─'*80}")
-        print(f"🤖 {agent_name.upper()} (ID: {agent_id}) - INDIVIDUAL ANALYSIS")
-        print(f"{'─'*80}")
+        _p(f"\n{'─'*80}")
+        _p(f"🤖 {agent_name.upper()} (ID: {agent_id}) - INDIVIDUAL ANALYSIS")
+        _p(f"{'─'*80}")
         
         # Filter messages for this agent.
         # full_context=True: every agent sees all messages in the session.
@@ -335,17 +337,17 @@ def execute_phase1_analysis(
             
         cleaned_processed = formatted_messages
         
-        print(f"   📊 Filtered context: {len(cleaned_processed)} messages")
+        _p(f"   📊 Filtered context: {len(cleaned_processed)} messages")
         
         # Check if agent participated
         if not cleaned_processed or len(cleaned_processed) == 0:
-            print(f"   ⚠️  {agent_name} did NOT participate in original session")
-            print(f"   ⏭️  SKIPPING - Non-participants do not analyze in Phase 1")
-            print(f"   💡 This agent will participate in Phase 2 (peer consultation)")
+            _p(f"   ⚠️  {agent_name} did NOT participate in original session")
+            _p(f"   ⏭️  SKIPPING - Non-participants do not analyze in Phase 1")
+            _p(f"   💡 This agent will participate in Phase 2 (peer consultation)")
             skipped_agents.append(agent_name)
             continue
         else:
-            print(f"   ✅ {agent_name} participated in original session")
+            _p(f"   ✅ {agent_name} participated in original session")
             
             # Participant case: use normal protocol with cleaned messages
             protocol_msg = create_poirot_protocol_message()
@@ -372,11 +374,11 @@ def execute_phase1_analysis(
             if vectors_to_ignore and len(vectors_to_ignore) > 0:
                 ignore_message = format_vectors_to_ignore(vectors_to_ignore)
                 context_messages.append(HumanMessage(content=ignore_message))
-                print(f"   ⚠️  Added {len(vectors_to_ignore)} known non-issues to ignore")
+                _p(f"   ⚠️  Added {len(vectors_to_ignore)} known non-issues to ignore")
         
             # Save complete context to JSON for verification
         context_filename = f"phase1_context_{agent_id}.json"
-        context_filepath = output_dir / context_filename
+        context_filepath = output_dir / context_filename if output_dir else None
         
         context_data = {
             "agent_id": agent_id,
@@ -418,9 +420,9 @@ def execute_phase1_analysis(
         with open(context_filepath, 'w', encoding='utf-8') as f:
             json.dump(context_data, f, indent=2, ensure_ascii=False)
         
-        print(f"   💾 Context saved to: {context_filename}")
+        _p(f"   💾 Context saved to: {context_filename}")
         
-        print(f"   🧠 Generating individual analysis...")
+        _p(f"   🧠 Generating individual analysis...")
 
         _MAX_LLM_RETRIES = max_llm_retries
         _LLM_RETRY_DELAY_503 = retry_delay_503
@@ -452,10 +454,10 @@ def execute_phase1_analysis(
                         _llm_attempts += 1
                         _code = '503 UNAVAILABLE' if _is_503 else '429 RESOURCE_EXHAUSTED'
                         _wait = _LLM_RETRY_DELAY_503 if _is_503 else _LLM_RETRY_DELAY_429
-                        print(f"\n⚠️  Transient LLM error ({_code}).")
-                        print(f"⏳ Pausing {_wait}s before retry ({_llm_attempts}/{_MAX_LLM_RETRIES})...")
+                        _p(f"\n⚠️  Transient LLM error ({_code}).")
+                        _p(f"⏳ Pausing {_wait}s before retry ({_llm_attempts}/{_MAX_LLM_RETRIES})...")
                         time.sleep(_wait)
-                        print(f"🔄 Retrying...")
+                        _p(f"🔄 Retrying...")
                     else:
                         raise
         else:
@@ -474,10 +476,10 @@ def execute_phase1_analysis(
                         _llm_attempts += 1
                         _code = '503 UNAVAILABLE' if _is_503 else '429 RESOURCE_EXHAUSTED'
                         _wait = _LLM_RETRY_DELAY_503 if _is_503 else _LLM_RETRY_DELAY_429
-                        print(f"\n⚠️  Transient LLM error ({_code}).")
-                        print(f"⏳ Pausing {_wait}s before retry ({_llm_attempts}/{_MAX_LLM_RETRIES})...")
+                        _p(f"\n⚠️  Transient LLM error ({_code}).")
+                        _p(f"⏳ Pausing {_wait}s before retry ({_llm_attempts}/{_MAX_LLM_RETRIES})...")
                         time.sleep(_wait)
-                        print(f"🔄 Retrying LLM call...")
+                        _p(f"🔄 Retrying LLM call...")
                     else:
                         raise
 
@@ -491,7 +493,7 @@ def execute_phase1_analysis(
             input_tokens = usage.input_tokens
             output_tokens = usage.output_tokens
             total_tokens = usage.total_tokens
-            print(f"   📊 Tokens: {usage.total_tokens} (in: {usage.input_tokens}, out: {usage.output_tokens})")
+            _p(f"   📊 Tokens: {usage.total_tokens} (in: {usage.input_tokens}, out: {usage.output_tokens})")
 
         # Extract text content from response (handles multimodal edge cases)
         if response is None:
@@ -525,7 +527,7 @@ def execute_phase1_analysis(
             'calls': 1
         }
         
-        print(f"   ✅ Analysis complete ({len(content_str)} characters)")
+        _p(f"   ✅ Analysis complete ({len(content_str)} characters)")
         
         # Try to parse JSON to show observations in a structured way
         try:
@@ -535,39 +537,39 @@ def execute_phase1_analysis(
                 json_data = json.loads(json_match.group(0))
                 observations = json_data.get('observations', [])
                 
-                print(f"\n   📝 OBSERVATIONS SUMMARY:")
-                print(f"   {'-'*76}")
+                _p(f"\n   📝 OBSERVATIONS SUMMARY:")
+                _p(f"   {'-'*76}")
                 
                 if not observations:
-                    print(f"   ✅ No unusual observations reported")
+                    _p(f"   ✅ No unusual observations reported")
                 else:
                     for idx, obs in enumerate(observations, 1):
                         desc = obs.get('description', 'N/A')
                         evidence = obs.get('evidence', 'N/A')
-                        print(f"   {idx}. {desc}")
-                        print(f"      Evidence: {evidence}")
+                        _p(f"   {idx}. {desc}")
+                        _p(f"      Evidence: {evidence}")
                         if idx < len(observations):
-                            print()
+                            _p()
                 
-                print(f"   {'-'*76}")
+                _p(f"   {'-'*76}")
             else:
                 # Fallback: show truncated response if JSON parsing fails
-                print(f"\n   📝 REPORT PREVIEW (first 500 chars):")
-                print(f"   {'-'*76}")
+                _p(f"\n   📝 REPORT PREVIEW (first 500 chars):")
+                _p(f"   {'-'*76}")
                 preview = content_str[:500].replace('\n', '\n   ')
-                print(f"   {preview}...")
-                print(f"   {'-'*76}")
+                _p(f"   {preview}...")
+                _p(f"   {'-'*76}")
         except Exception as e:
             # If parsing fails, show truncated response
-            print(f"\n   📝 REPORT PREVIEW (parsing failed):")
-            print(f"   {'-'*76}")
+            _p(f"\n   📝 REPORT PREVIEW (parsing failed):")
+            _p(f"   {'-'*76}")
             preview = content_str[:500].replace('\n', '\n   ')
-            print(f"   {preview}...")
-            print(f"   {'-'*76}")
+            _p(f"   {preview}...")
+            _p(f"   {'-'*76}")
         
         # Save to individual file
         filename = f"phase1_individual_report_{agent_id}.txt"
-        filepath = output_dir / filename
+        filepath = output_dir / filename if output_dir else None
         
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write("="*80 + "\n")
@@ -586,18 +588,18 @@ def execute_phase1_analysis(
             f.write("END OF INDIVIDUAL ANALYSIS\n")
             f.write("="*80 + "\n")
         
-        print(f"   💾 Saved to: {filename}")
+        _p(f"   💾 Saved to: {filename}")
     
-    print("\n" + "="*80)
-    print("✅ PHASE 1 COMPLETE")
-    print("="*80)
-    print(f"📊 Analysis Summary:")
-    print(f"   Participating agents analyzed: {len(phase1_reports)}")
-    print(f"   Non-participating agents skipped: {len(skipped_agents)}")
+    _p("\n" + "="*80)
+    _p("✅ PHASE 1 COMPLETE")
+    _p("="*80)
+    _p(f"📊 Analysis Summary:")
+    _p(f"   Participating agents analyzed: {len(phase1_reports)}")
+    _p(f"   Non-participating agents skipped: {len(skipped_agents)}")
     if skipped_agents:
-        print(f"   Skipped: {', '.join(skipped_agents)}")
-    print(f"\n📁 Reports saved to: {output_dir}")
-    print("="*80 + "\n")
+        _p(f"   Skipped: {', '.join(skipped_agents)}")
+    _p(f"\n📁 Reports saved to: {output_dir}")
+    _p("="*80 + "\n")
     
     return {
         'reports': phase1_reports,

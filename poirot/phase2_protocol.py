@@ -1884,20 +1884,20 @@ def execute_phase2_analysis(
         - state: Final LangGraph state
         - output_files: List of created output file paths
     """
-    print(f"\n{'='*80}")
-    print("POIROT PHASE 2: PEER CONSULTATION PROTOCOL")
-    print(f"{'='*80}")
-    print(f"Session ID: {session_id}")
-    print(f"Database: {db_path}")
-    print(f"Model: {model_name}")
+    _p(f"\n{'='*80}")
+    _p("POIROT PHASE 2: PEER CONSULTATION PROTOCOL")
+    _p(f"{'='*80}")
+    _p(f"Session ID: {session_id}")
+    _p(f"Database: {db_path}")
+    _p(f"Model: {model_name}")
     
     # Set output directory
     if output_dir is None:
         output_dir = Path("POIROT_output") / "phase2" / f"session_{session_id}"
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    print(f"Output directory: {output_dir}")
-    print(f"{'='*80}\n")
+    _p(f"Output directory: {output_dir}")
+    _p(f"{'='*80}\n")
     
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 1: Load agents and their relationships
@@ -1905,11 +1905,11 @@ def execute_phase2_analysis(
     # skip the database query entirely.
     # ═══════════════════════════════════════════════════════════════════════
     if agents_data_override is not None:
-        print("📚 STEP 1: Using pre-built agent data (agentless mode)...")
+        _p("📚 STEP 1: Using pre-built agent data (agentless mode)...")
         agents_data = agents_data_override
         agent_order = list(agents_data_override.keys())
     else:
-        print("📚 STEP 1: Loading agents from database...")
+        _p("📚 STEP 1: Loading agents from database...")
         agents_data, agent_order = get_agents_for_session(
             db_path=str(db_path),
             session_id=session_id
@@ -1927,10 +1927,10 @@ def execute_phase2_analysis(
     # mode) skip the database query entirely.
     # ═══════════════════════════════════════════════════════════════════════
     if historical_messages_override is not None:
-        print("📜 STEP 2: Using pre-built historical messages (agentless mode)...")
+        _p("📜 STEP 2: Using pre-built historical messages (agentless mode)...")
         historical_messages = historical_messages_override
     else:
-        print("📜 STEP 2: Loading historical messages from database...")
+        _p("📜 STEP 2: Loading historical messages from database...")
 
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
@@ -1972,13 +1972,13 @@ def execute_phase2_analysis(
 
         conn.close()
 
-    print(f"  ✅ Loaded {len(historical_messages)} historical messages")
-    print()
+    _p(f"  ✅ Loaded {len(historical_messages)} historical messages")
+    _p()
     
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 3: Create communication tools for each agent
     # ═══════════════════════════════════════════════════════════════════════
-    print("🔧 STEP 3: Creating communication tools...")
+    _p("🔧 STEP 3: Creating communication tools...")
     
     tool_factory = CommunicationToolFactory()
     agent_tools = {}  # {agent_id: [tool1, tool2, ...]}
@@ -1992,7 +1992,7 @@ def execute_phase2_analysis(
         if not targets:
             # Allow communication with all other agents (except self)
             targets = [aid for aid in agents_data.keys() if aid != agent_id]
-            print(f"  ℹ️  {agent_data['name']}: No communication targets defined, enabling ALL peers")
+            _p(f"  ℹ️  {agent_data['name']}: No communication targets defined, enabling ALL peers")
         
         for target_id in targets:
             if target_id in agents_data and target_id != agent_id:
@@ -2002,14 +2002,14 @@ def execute_phase2_analysis(
         agent_tools[agent_id] = tools
         
         tool_names = [t.name for t in tools]
-        print(f"  ✅ {agent_data['name']}: {len(tools)} tools ({', '.join(tool_names) if tool_names else 'none'})")
+        _p(f"  ✅ {agent_data['name']}: {len(tools)} tools ({', '.join(tool_names) if tool_names else 'none'})")
     
-    print()
+    _p()
     
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 4: Create agent nodes for LangGraph
     # ═══════════════════════════════════════════════════════════════════════
-    print("🏗️  STEP 4: Creating LangGraph nodes...")
+    _p("🏗️  STEP 4: Creating LangGraph nodes...")
     
     agent_nodes = {}  # {agent_id: {'call_llm': fn, 'take_action': fn, 'tools_dict': dict}}
     
@@ -2044,14 +2044,14 @@ def execute_phase2_analysis(
             'tools_dict': tools_dict
         }
         
-        print(f"  ✅ Created nodes for {agent_data['name']}")
+        _p(f"  ✅ Created nodes for {agent_data['name']}")
     
-    print()
+    _p()
     
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 5: Create POIROT server and routing functions
     # ═══════════════════════════════════════════════════════════════════════
-    print("🌐 STEP 5: Creating POIROT server and routing...")
+    _p("🌐 STEP 5: Creating POIROT server and routing...")
     
     poirot_server = create_poirot_server_node(
         agents_data=agents_data,
@@ -2075,14 +2075,14 @@ def execute_phase2_analysis(
             'route_after_tools': route_tools
         }
     
-    print(f"  ✅ POIROT server created")
-    print(f"  ✅ Routing functions created for {len(agent_routers)} agents")
-    print()
+    _p(f"  ✅ POIROT server created")
+    _p(f"  ✅ Routing functions created for {len(agent_routers)} agents")
+    _p()
     
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 6: Build LangGraph StateGraph
     # ═══════════════════════════════════════════════════════════════════════
-    print("🏗️  STEP 6: Building LangGraph StateGraph...")
+    _p("🏗️  STEP 6: Building LangGraph StateGraph...")
     
     graph = StateGraph(Phase2State)
     
@@ -2159,17 +2159,17 @@ def execute_phase2_analysis(
     # Compile graph
     compiled_graph = graph.compile()
     
-    print(f"  ✅ StateGraph built successfully")
-    print(f"     - {len(agent_order)} agent nodes")
-    print(f"     - 1 POIROT server node")
-    print(f"     - Entry point: {agent_order[0]}")
-    print()
+    _p(f"  ✅ StateGraph built successfully")
+    _p(f"     - {len(agent_order)} agent nodes")
+    _p(f"     - 1 POIROT server node")
+    _p(f"     - Entry point: {agent_order[0]}")
+    _p()
     
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 7: Initialize state and execute graph
     # ═══════════════════════════════════════════════════════════════════════
-    print("🚀 STEP 7: Executing Phase 2 consultation process...")
-    print(f"{'='*80}\n")
+    _p("🚀 STEP 7: Executing Phase 2 consultation process...")
+    _p(f"{'='*80}\n")
     
     # Initialize state
     initial_state = {
@@ -2232,29 +2232,29 @@ def execute_phase2_analysis(
                 if rate_limit_retry_count < max_rate_limit_retries:
                     _code   = '429 RESOURCE_EXHAUSTED' if _is_rate_limit else '503 UNAVAILABLE'
                     _wait   = rate_limit_wait_seconds if _is_rate_limit else 30
-                    print(f"\n⚠️  Transient API error reached graph level ({_code})")
-                    print(f"⏳ Waiting {_wait}s before retry "
+                    _p(f"\n⚠️  Transient API error reached graph level ({_code})")
+                    _p(f"⏳ Waiting {_wait}s before retry "
                           f"({rate_limit_retry_count}/{max_rate_limit_retries})...")
                     time.sleep(_wait)
-                    print("🔄 Resuming graph execution...")
+                    _p("🔄 Resuming graph execution...")
                 else:
-                    print(f"\n❌ Max retries ({max_rate_limit_retries}) exceeded. Proceeding with partial results...")
+                    _p(f"\n❌ Max retries ({max_rate_limit_retries}) exceeded. Proceeding with partial results...")
                     execution_complete = True
             else:
                 # Other error (e.g., recursion limit)
-                print(f"\n⚠️  Graph execution interrupted (likely recursion limit): {e}")
-                print("⚠️  Proceeding with partial results...")
+                _p(f"\n⚠️  Graph execution interrupted (likely recursion limit): {e}")
+                _p("⚠️  Proceeding with partial results...")
                 execution_complete = True  # Exit loop
                 # We continue with whatever final_state we have accumulated
     
-    print(f"\n{'='*80}")
-    print("✅ Phase 2 consultation completed successfully")
-    print(f"{'='*80}\n")
+    _p(f"\n{'='*80}")
+    _p("✅ Phase 2 consultation completed successfully")
+    _p(f"{'='*80}\n")
     
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 8: Extract votes and save outputs
     # ═══════════════════════════════════════════════════════════════════════
-    print("💾 STEP 8: Extracting votes and saving outputs...")
+    _p("💾 STEP 8: Extracting votes and saving outputs...")
     
     votes = {}
     output_files = []
@@ -2272,17 +2272,17 @@ def execute_phase2_analysis(
             'justification': justification
         }
         
-        print(f"\n  📋 {agents_data[agent_id]['name']} ({agent_id}):")
-        print(f"     Hazard Vector: {hazard_vector}")
-        print(f"     Location: {location}")
-        print(f"     Justification: {justification}")
+        _p(f"\n  📋 {agents_data[agent_id]['name']} ({agent_id}):")
+        _p(f"     Hazard Vector: {hazard_vector}")
+        _p(f"     Location: {location}")
+        _p(f"     Justification: {justification}")
     
     # Save votes JSON
     votes_file = output_dir / "phase2_votes.json"
     with open(votes_file, 'w', encoding='utf-8') as f:
         json.dump(votes, f, indent=2, ensure_ascii=False)
     output_files.append(votes_file)
-    print(f"\n  ✅ Saved votes to: {votes_file}")
+    _p(f"\n  ✅ Saved votes to: {votes_file}")
     
     # Save full state JSON
     state_file = output_dir / "phase2_state.json"
@@ -2302,7 +2302,7 @@ def execute_phase2_analysis(
     with open(state_file, 'w', encoding='utf-8') as f:
         json.dump(state_serializable, f, indent=2, ensure_ascii=False)
     output_files.append(state_file)
-    print(f"  ✅ Saved state to: {state_file}")
+    _p(f"  ✅ Saved state to: {state_file}")
     
     # Save summary report
     summary_file = output_dir / "phase2_summary.txt"
@@ -2326,14 +2326,14 @@ def execute_phase2_analysis(
             f.write("\n" + "─"*80 + "\n\n")
     
     output_files.append(summary_file)
-    print(f"  ✅ Saved summary to: {summary_file}")
+    _p(f"  ✅ Saved summary to: {summary_file}")
     
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 9: Perform Weighted Voting Analysis
     # ═══════════════════════════════════════════════════════════════════════
     voting_results = None
     if weighted_voting_analysis and error_space:
-        print("\n🗳️ STEP 9: Performing Weighted Voting Analysis...")
+        _p("\n🗳️ STEP 9: Performing Weighted Voting Analysis...")
         
         # Prepare agent_outputs list
         agent_outputs = []
@@ -2361,28 +2361,28 @@ def execute_phase2_analysis(
             with open(voting_file, 'w', encoding='utf-8') as f:
                 json.dump(voting_results, f, indent=2, ensure_ascii=False)
             output_files.append(voting_file)
-            print(f"  ✅ Saved voting analysis to: {voting_file}")
+            _p(f"  ✅ Saved voting analysis to: {voting_file}")
             
             # Print detailed summary (POIROTMini style)
             if 'winning_location' in voting_results:
                 winner = voting_results['winning_location']
                 
-                print("\n" + "="*80)
-                print("📊 VOTING RESULTS")
-                print("="*80)
+                _p("\n" + "="*80)
+                _p("📊 VOTING RESULTS")
+                _p("="*80)
                 
                 # Get dimension ID safely
                 dim_idx = winner.get('dimension_index', -1)
                 error_regions = poirot_preanalysis.get('error_regions', [])
                 dim_id = error_regions[dim_idx]['id'] if 0 <= dim_idx < len(error_regions) else "?"
                 
-                print("\n🏆 WINNING LOCATION:")
-                print(f"   Component: {winner['name']}")
-                print(f"   Dimension: {dim_id}")
-                print(f"   Total Score: {winner['total_score']:.4f}")
-                print(f"   Percentage: {winner['percentage']}%")
+                _p("\n🏆 WINNING LOCATION:")
+                _p(f"   Component: {winner['name']}")
+                _p(f"   Dimension: {dim_id}")
+                _p(f"   Total Score: {winner['total_score']:.4f}")
+                _p(f"   Percentage: {winner['percentage']}%")
                 
-                print("\n📋 INDIVIDUAL AGENT VOTES:")
+                _p("\n📋 INDIVIDUAL AGENT VOTES:")
                 
                 # Map agent IDs to readable names for display
                 agent_id_to_name = {aid: adata['name'] for aid, adata in agents_data.items()}
@@ -2392,17 +2392,17 @@ def execute_phase2_analysis(
                     agent_id = vote['agent_name']
                     display_name = agent_id_to_name.get(agent_id, agent_id)
                     
-                    print(f"\n   🔹 {display_name}:")
-                    print(f"      Voted for: {vote['voted_location']}")
-                    print(f"      Hazard identified: {vote['hazard_vector']}")
-                    print(f"      Vote weight: {vote['vote_weight']:.4f}")
-                    print(f"      Similarity to own position: {vote['similarity_to_self']:.4f}")
+                    _p(f"\n   🔹 {display_name}:")
+                    _p(f"      Voted for: {vote['voted_location']}")
+                    _p(f"      Hazard identified: {vote['hazard_vector']}")
+                    _p(f"      Vote weight: {vote['vote_weight']:.4f}")
+                    _p(f"      Similarity to own position: {vote['similarity_to_self']:.4f}")
                 
-                print("\n" + "="*80)
-                print("📈 PROBABILITY BY ERROR DIMENSION")
-                print("="*80)
-                print("\nEach dimension represents a potential error source.")
-                print("Probabilities show likelihood that error originated there:\n")
+                _p("\n" + "="*80)
+                _p("📈 PROBABILITY BY ERROR DIMENSION")
+                _p("="*80)
+                _p("\nEach dimension represents a potential error source.")
+                _p("Probabilities show likelihood that error originated there:\n")
                 
                 total_prob = 0
                 # Use dimension_rankings which has the scores and percentages
@@ -2420,21 +2420,21 @@ def execute_phase2_analysis(
                     bar_length = int(percentage / 2)  # 50 chars = 100%
                     bar = "█" * bar_length + "░" * (50 - bar_length)
                     
-                    print(f"\n📍 {name} ({region_id})")
-                    print(f"   {bar} {percentage:.1f}%")
-                    print(f"   Weighted votes: {score:.4f}")
+                    _p(f"\n📍 {name} ({region_id})")
+                    _p(f"   {bar} {percentage:.1f}%")
+                    _p(f"   Weighted votes: {score:.4f}")
                 
-                print(f"\n✓ Total probability: {total_prob:.1f}% (should be ~100%)")
-                print("\n" + "="*80)
+                _p(f"\n✓ Total probability: {total_prob:.1f}% (should be ~100%)")
+                _p("\n" + "="*80)
             
         except Exception as e:
-            print(f"  ❌ Error during voting analysis: {e}")
+            _p(f"  ❌ Error during voting analysis: {e}")
             import traceback
             traceback.print_exc()
 
-    print(f"\n{'='*80}")
-    print("🎉 Phase 2 Protocol completed successfully!")
-    print(f"{'='*80}\n")
+    _p(f"\n{'='*80}")
+    _p("🎉 Phase 2 Protocol completed successfully!")
+    _p(f"{'='*80}\n")
     
     # Calculate Token Usage from Final State Messages
     phase2_metadata = {
@@ -2487,7 +2487,7 @@ def execute_phase2_analysis(
                 phase2_metadata['by_agent'][from_node]['calls'] += 1
 
     except Exception as e:
-        print(f"⚠️ Error calculating token usage: {e}")
+        _p(f"⚠️ Error calculating token usage: {e}")
 
     return {
         'votes': votes,

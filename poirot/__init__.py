@@ -76,9 +76,11 @@ def run_poirot(
     api_key: Optional[str] = None,
     # ── Optional — basic ───────────────────────────────────────────────────
     session_id: Optional[str] = None,
-    output_dir: str = "poirot_results",
+    output_dir: Optional[str] = None,
     model: Optional[str] = None,
     ignore_list: Optional[List[str]] = None,
+    # ── Optional — output / verbosity ──────────────────────────────────────
+    verbose: bool = True,
     # ── Optional — message context ─────────────────────────────────────────
     include_tool_calls: bool = False,
     include_broadcast_messages: bool = False,
@@ -104,6 +106,8 @@ def run_poirot(
         api_key: API key for the provider. Not required for "local" or "ollama".
         session_id: Specific session to analyze. Defaults to the most recent session.
         output_dir: Directory where results and intermediate files are written.
+            If ``None`` (default) no files are saved.
+        verbose: If ``False``, suppress all protocol progress output to stdout.
         model: Override the default model for the selected provider.
         ignore_list: Component names to exclude from error vector analysis.
         include_tool_calls: Include tool call messages in agent context windows.
@@ -149,7 +153,7 @@ def run_poirot(
         system_name=system_name,
         system_description=system_description,
         database_path=database_path,
-        output_dir=output_dir,
+        output_dir=output_dir or "poirot_results",
         ignore_list=ignore_list,
         llm_model=resolved_model,
         session_id=session_id,
@@ -166,6 +170,7 @@ def run_poirot(
         max_llm_retries=max_llm_retries,
         retry_delay_503=retry_delay_503,
         retry_delay_429=retry_delay_429,
+        verbose=verbose,
     )
 
     return pipeline.run_full_analysis(specific_session_id=session_id)
@@ -180,8 +185,10 @@ def run_poirot_from_agents(
     model: str,
     api_key: Optional[str] = None,
     # ── Optional — basic ───────────────────────────────────────────────────
-    output_dir: str = "poirot_results",
+    output_dir: Optional[str] = None,
     ignore_list: Optional[List[str]] = None,
+    # ── Optional — output / verbosity ──────────────────────────────────────
+    verbose: bool = True,
     # ── Optional — message context ─────────────────────────────────────────
     include_tool_calls: bool = False,
     include_broadcast_messages: bool = False,
@@ -212,7 +219,9 @@ def run_poirot_from_agents(
             ``"gemini-2.5-pro"``). **Required — no default.**
         api_key: API key for the provider. Not required for ``"local"`` or
             ``"ollama"``.
-        output_dir: Directory where results and intermediate files are written.
+        output_dir: Directory where result files are written.
+            If ``None`` (default) no files are saved.
+        verbose: If ``False``, suppress all protocol progress output to stdout.
         ignore_list: Component names to exclude from error vector analysis.
         include_tool_calls: Include tool call messages in agent context windows.
         include_broadcast_messages: Include broadcast messages (sent to all agents).
@@ -227,8 +236,22 @@ def run_poirot_from_agents(
         retry_delay_429: Seconds to wait after a 429 RESOURCE_EXHAUSTED error.
 
     Returns:
-        Dictionary with full analysis results including ``votes`` and
-        ``phase0_error_space``.
+        Dictionary with the following keys:
+
+        ``system_name``
+            Name of the analyzed system.
+        ``error_space``
+            List of error dimensions defined in Phase 0 — each with ``id``,
+            ``name``, ``type``, and ``description``.
+        ``consensus``
+            Aggregated verdict: ``faulty_component`` (name), ``fault_vector``
+            (binary list), ``confidence_pct``, ``is_tie``,
+            ``tied_components``.
+        ``agent_reports``
+            Per-agent dict: ``name``, ``vote`` (binary list),
+            ``vote_description``, ``justification``.
+        ``details``
+            Raw phase outputs for advanced inspection.
 
     Raises:
         ValueError: If an unknown provider is specified.
@@ -256,8 +279,12 @@ def run_poirot_from_agents(
 
     use_local_llm = provider in ("local", "ollama")
     local_model_name = model if use_local_llm else None
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
+
+    # Only create output directory when the caller requests it
+    output_path: Optional[Path] = None
+    if output_dir is not None:
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
 
     # Build session data from adapters.
     # Each agent's compiled graph is stored in agents_configs[id]["compiled_agent"]
@@ -275,7 +302,9 @@ def run_poirot_from_agents(
         local_model_name=local_model_name,
         llm_provider=provider,
     )
-    error_space = poirot_agent.analyze_system(system_description, ignore_list=ignore_list)
+    error_space = poirot_agent.analyze_system(
+        system_description, ignore_list=ignore_list, verbose=verbose
+    )
 
     # Phase 1: Individual analysis (no agent factory — agentless mode)
     phase1_result = execute_phase1_analysis(
@@ -297,6 +326,7 @@ def run_poirot_from_agents(
         retry_delay_503=retry_delay_503,
         retry_delay_429=retry_delay_429,
         api_call_delay=api_call_delay,
+        verbose=verbose,
     )
 
     phase1_reports = (
@@ -313,7 +343,7 @@ def run_poirot_from_agents(
         vectors_to_ignore=ignore_list,
         error_space=error_space,
         model_name=model,
-        output_dir=output_path / "phase2",
+        output_dir=output_path / "phase2" if output_path else None,
         include_tool_calls=include_tool_calls,
         include_broadcast_messages=include_broadcast_messages,
         full_context=full_context,
@@ -328,12 +358,41 @@ def run_poirot_from_agents(
         token_budget=token_budget,
         historical_messages_override=historical_messages,
         agents_data_override=agents_configs,
+        verbose=verbose,
     )
+
+    # ── Build user-friendly result ───────────────────────────────────────────
+    voting_results = phase2_result.get("voting_results", {})
+    winning = voting_results.get("winning_location", {})
+    voting_summary = voting_results.get("voting_summary", {})
+    tied_locations = voting_results.get("tied_locations") or []
 
     return {
         "system_name": system_name,
-        "phase0_error_space": error_space,
-        "phase1_protocol": phase1_reports,
-        "phase2_protocol": phase2_result,
-        "votes": phase2_result.get("votes", {}),
+        # Error dimensions defined in Phase 0
+        "error_space": error_space.get("error_regions", []),
+        # Aggregated verdict
+        "consensus": {
+            "faulty_component": winning.get("name", "unknown"),
+            "fault_vector": winning.get("vector", []),
+            "confidence_pct": winning.get("percentage", 0.0),
+            "is_tie": voting_summary.get("is_tie", False),
+            "tied_components": [t["name"] for t in tied_locations],
+        },
+        # Per-agent final votes from Phase 2
+        "agent_reports": {
+            agent_id: {
+                "name": data.get("agent_name", agent_id),
+                "vote": data.get("location", []),
+                "vote_description": data.get("hazard_vector", ""),
+                "justification": data.get("justification", ""),
+            }
+            for agent_id, data in phase2_result.get("votes", {}).items()
+        },
+        # Raw phase outputs for advanced inspection
+        "details": {
+            "phase0_error_space": error_space,
+            "phase1_reports": phase1_reports,
+            "phase2_voting": voting_results,
+        },
     }

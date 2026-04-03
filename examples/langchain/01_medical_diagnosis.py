@@ -22,6 +22,8 @@ import os
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 from langchain_core.tools import tool
+import warnings
+warnings.filterwarnings("ignore", message="create_react_agent has been moved")
 from langgraph.prebuilt import create_react_agent
 
 from poirot import run_poirot_from_agents, LangChainAgentAdapter
@@ -313,8 +315,12 @@ if __name__ == "__main__":
     print("\n" + "=" * 60)
     print("POIROT ANALYSIS COMPLETE")
     print("=" * 60)
-    for agent_id, vote in results["votes"].items():
-        print(f"\n[{agent_id}]")
-        print(f"  Hazard vector : {vote.get('hazard_vector')}")
-        print(f"  Location      : {vote.get('location')}")
-        print(f"  Justification : {vote.get('justification', '')[:200]}")
+    c = results["consensus"]
+    print(f"\nFaulty component : {c['faulty_component']}")
+    print(f"Confidence       : {c['confidence_pct']:.1f}%")
+    print(f"Fault vector     : {c['fault_vector']}")
+
+    for agent_id, report in results["agent_reports"].items():
+        print(f"\n[{report['name']}]")
+        print(f"  Vote          : {report['vote']}")
+        print(f"  Justification : {report['justification'][:200]}")

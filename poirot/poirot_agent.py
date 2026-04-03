@@ -27,7 +27,7 @@ except ImportError:
     try:
         from .llm_factory import LLMFactory
     except ImportError:
-        print("⚠️ Could not import LLMFactory. Only Gemini API will be available.")
+        _p("⚠️ Could not import LLMFactory. Only Gemini API will be available.")
         LLMFactory = None
 
 # Import token tracker
@@ -121,7 +121,7 @@ class POIROTAgent:
     Usage example:
         >>> agent = POIROTAgent(model="gemini-2.5-pro")
         >>> result = agent.analyze_system(system_description)
-        >>> print(result["error_regions"])
+        >>> _p(result["error_regions"])
         [{'id': 'x1', 'name': 'Portfolio Manager', 'type': 'agent', ...}, ...]
     """
 
@@ -157,7 +157,7 @@ class POIROTAgent:
         # Vectors to ignore: a list of human-readable strings that should NOT be treated as potential error regions
         self.vectors_to_ignore: List[str] = vectors_to_ignore or []
 
-    def analyze_system(self, system_description: str, ignore_list: Optional[List[str]] = None) -> Dict[str, Any]:
+    def analyze_system(self, system_description: str, ignore_list: Optional[List[str]] = None, verbose: bool = True) -> Dict[str, Any]:
         """Run the POIROT pre-analysis on a textual description of a multi-agent system.
 
         This method sends the system description to the LLM and receives a structured
@@ -182,6 +182,7 @@ class POIROTAgent:
         Raises:
             Exception: If LLM invocation fails or response cannot be parsed
         """
+        _p = print if verbose else (lambda *a, **kw: None)
         # Determine the ignore list to pass to the LLM: method arg overrides constructor list
         effective_ignore = ignore_list if ignore_list is not None else self.vectors_to_ignore
 
@@ -222,7 +223,7 @@ class POIROTAgent:
         if self.token_tracker is not None and extract_tokens_from_response is not None:
             usage = extract_tokens_from_response(response)
             self.token_tracker.add(usage)
-            print(f"   📊 Tokens used: {usage.total_tokens} (input: {usage.input_tokens}, output: {usage.output_tokens})")
+            _p(f"   📊 Tokens used: {usage.total_tokens} (input: {usage.input_tokens}, output: {usage.output_tokens})")
 
         # The model MUST return JSON only; try to parse it
         try:

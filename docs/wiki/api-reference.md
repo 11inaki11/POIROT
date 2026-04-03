@@ -41,7 +41,8 @@ Returns a `dict` with the full analysis results including agent votes and the fi
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
 | `session_id` | `str` | `None` | Specific session to analyze. If `None`, POIROT uses the most recent session in the database. |
-| `output_dir` | `str` | `"poirot_results"` | Directory where result files are written. Created automatically if it does not exist. |
+| `output_dir` | `str \| None` | `None` | Directory where result files are written. Created automatically if it does not exist. If `None`, no files are saved. |
+| `verbose` | `bool` | `True` | If `False`, suppress all protocol progress output to the terminal. |
 | `model` | `str` | `None` | Override the default model for the selected provider. See [LLM Providers](providers.md) for defaults. |
 | `ignore_list` | `list[str]` | `None` | Component names to exclude from the error vector analysis. Useful for known non-issues. |
 
@@ -146,7 +147,8 @@ results = run_poirot_from_agents(
 | `provider` | `str` | required | Default LLM provider for Phase 0 and agents without a per-agent override |
 | `model` | `str` | required | Default model name. No default — must be explicit |
 | `api_key` | `str` | `None` | Default API key. Not required for `"ollama"` or `"local"` |
-| `output_dir` | `str` | `"poirot_results"` | Directory for result files |
+| `output_dir` | `str \| None` | `None` | Directory for result files. If `None`, no files are saved. |
+| `verbose` | `bool` | `True` | If `False`, suppress all protocol progress output to the terminal. |
 | `ignore_list` | `list[str]` | `None` | Component names to exclude from error vector analysis |
 | `include_tool_calls` | `bool` | `False` | Include tool call messages in context windows |
 | `include_broadcast_messages` | `bool` | `False` | Include broadcast messages in context windows |
@@ -158,6 +160,90 @@ results = run_poirot_from_agents(
 | `max_llm_retries` | `int` | `5` | Max retries on transient errors |
 | `retry_delay_503` | `int` | `30` | Wait seconds after a 503 error |
 | `retry_delay_429` | `int` | `60` | Wait seconds after a 429 error |
+
+---
+
+## Reading the results
+
+Both entry points return a `dict`. The structure is the same for `run_poirot_from_agents()`; `run_poirot()` follows the same top-level keys.
+
+```python
+results = run_poirot_from_agents(...)
+
+# ── Top-level keys ────────────────────────────────────────────────────────────
+results["system_name"]       # str  — name you passed in
+results["error_space"]       # list — error dimensions from Phase 0
+results["consensus"]         # dict — aggregated verdict
+results["agent_reports"]     # dict — per-agent final votes
+results["details"]           # dict — raw phase outputs for advanced inspection
+```
+
+### `error_space`
+
+List of dicts, one per error dimension defined in Phase 0.
+
+```python
+for dim in results["error_space"]:
+    print(dim["id"])          # "x1", "x2", ...
+    print(dim["name"])        # "DiagnosisAgent omits medication info"
+    print(dim["type"])        # "agent" | "software" | "hardware" | ...
+    print(dim["description"]) # Explanation of the failure mode
+```
+
+### `consensus`
+
+The weighted vote aggregation — the main verdict.
+
+```python
+c = results["consensus"]
+print(c["faulty_component"])  # "DiagnosisAgent" — component with highest vote weight
+print(c["fault_vector"])      # [1, 0] — binary position in the error space
+print(c["confidence_pct"])    # 72.4  — percentage of total vote weight
+print(c["is_tie"])            # False
+print(c["tied_components"])   # [] or ["AgentA", "AgentB"] when is_tie=True
+```
+
+### `agent_reports`
+
+One entry per agent, keyed by `agent_id`.
+
+```python
+for agent_id, report in results["agent_reports"].items():
+    print(report["name"])             # "DiagnosisAgent"
+    print(report["vote"])             # [1, 0] — the binary vector this agent voted
+    print(report["vote_description"]) # Short description of the hazard
+    print(report["justification"])    # Full reasoning from the agent
+```
+
+### `details`
+
+Raw outputs from each phase, useful for debugging or custom analysis.
+
+```python
+results["details"]["phase0_error_space"]  # Full Phase 0 output dict
+results["details"]["phase1_reports"]      # Per-agent Phase 1 self-assessment
+results["details"]["phase2_voting"]       # Full voting analysis (weights, rankings)
+```
+
+### Minimal example
+
+```python
+results = run_poirot_from_agents(
+    agents=[...],
+    system_name="EmergencyDiagnosisSystem",
+    system_description="...",
+    provider="gemini",
+    model="gemini-2.5-pro",
+    api_key=os.getenv("GOOGLE_API_KEY"),
+)
+
+print(f"Faulty component: {results['consensus']['faulty_component']}")
+print(f"Confidence: {results['consensus']['confidence_pct']:.1f}%")
+
+for agent_id, report in results["agent_reports"].items():
+    print(f"\n{report['name']} voted: {report['vote']}")
+    print(f"  Justification: {report['justification'][:120]}...")
+```
 
 ---
 

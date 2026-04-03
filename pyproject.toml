@@ -22,4 +22,4 @@ dev = ["pytest>=8.0", "ruff"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["poirot*"]
+include = ["poirot", "poirot.*"]

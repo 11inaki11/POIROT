@@ -16,7 +16,7 @@ POIROT automates that investigation. You give it a description of your system an
 >
 > **Website:** *(coming soon)*
 >
-> **Documentation wiki:** *(in development — see [docs/wiki/](docs/wiki/) in the meantime)*
+> **Documentation wiki:** [github.com/11inaki11/POIROT/wiki](https://github.com/11inaki11/POIROT/wiki)
 
 ---
 

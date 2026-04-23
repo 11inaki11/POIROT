@@ -4,11 +4,28 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "poirot-framework"
-version = "1.1.0"
+version = "0.1.0"
 description = "POIROT: Automated forensic analysis for multi-agent AI systems"
 readme = "README.md"
 requires-python = ">=3.10"
-keywords = ["multi-agent", "forensics", "LLM", "analysis", "POIROT"]
+license = {file = "LICENSE"}
+authors = [
+    {name = "Inaki Dellibarda", email = "i.dellibardavarela@gmail.com"},
+]
+keywords = ["multi-agent", "forensics", "LLM", "analysis", "POIROT", "AI safety", "agent debugging"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "langchain-core>=0.3",
     "langchain-google-genai>=2.0",
@@ -19,6 +36,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff"]
+
+[project.urls]
+Homepage = "https://github.com/11inaki11/POIROT"
+Documentation = "https://github.com/11inaki11/POIROT/wiki"
+Repository = "https://github.com/11inaki11/POIROT"
+Issues = "https://github.com/11inaki11/POIROT/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

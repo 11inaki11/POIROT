@@ -38,6 +38,8 @@ Example (LangChain agents)::
 Version: 1.1.0
 """
 
+__version__ = "0.1.0"
+
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional

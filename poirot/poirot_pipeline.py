@@ -445,7 +445,6 @@ class POIROTPipeline:
             self._p(f"\n Using smart agent selection for session: {self.session_id[:8]}...")
             
             # Get the correct agent IDs for this session (participants + judges)
-            from pathlib import Path
             session_agents_data, _ = get_agents_for_session(
                 db_path=str(Path(self.database_path)),
                 session_id=self.session_id

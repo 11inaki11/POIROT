@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" alt="POIROT" width="180">
+</p>
+
 # POIROT
 
 **Automated forensic analysis for multi-agent AI systems.**

@@ -33,6 +33,18 @@ The result is an explainable, auditable forensic report — not a black-box pred
 
 ---
 
+## Benchmark results
+
+Evaluated on the **Who&When benchmark** — 122 heterogeneous multi-agent configurations each with a single injected fault spanning medical, financial, and software domains.
+
+<p align="center">
+  <img src="assets/benchmarkStats.png" alt="POIROT vs single-LLM baseline accuracy on the Who&amp;When benchmark" width="560">
+</p>
+
+POIROT consistently outperforms a single-LLM baseline across all four tested models. The advantage is largest on harder configurations: for Gemini 2.5 Pro, accuracy jumps from 21.3% (baseline) to 50.4% with POIROT — a **+136% relative gain**. DeepSeek goes from 32.8% to 52.1% (+59%). Even in the most competitive setting (GPT-oss 120B), POIROT adds +2.8 pp, and smaller models benefit most from the multi-agent protocol.
+
+---
+
 ## Installation
 
 ```bash
@@ -44,6 +56,24 @@ Requires Python 3.10+.
 ---
 
 ## Quickstart
+
+### With LangChain agents (direct integration)
+
+```python
+from poirot import run_poirot_from_agents, LangChainAgentAdapter
+
+results = run_poirot_from_agents(
+    agents=[
+        LangChainAgentAdapter(agent=planner, messages=planner_messages, agent_id="planner", agent_name="PlannerAgent"),
+        LangChainAgentAdapter(agent=executor, messages=executor_messages, agent_id="executor", agent_name="ExecutorAgent"),
+    ],
+    system_name="MyAgentSystem",
+    system_description="...",
+    provider="gemini",
+    model="gemini-2.5-pro",
+    api_key="YOUR_API_KEY",
+)
+```
 
 ### With a SQLite database (any system, any language)
 
@@ -69,24 +99,6 @@ if c["is_tie"]:
 else:
     print(f"Faulty component : {c['faulty_component']}")
 print(f"Confidence       : {c['confidence_pct']:.1f}%")
-```
-
-### With LangChain agents (direct integration)
-
-```python
-from poirot import run_poirot_from_agents, LangChainAgentAdapter
-
-results = run_poirot_from_agents(
-    agents=[
-        LangChainAgentAdapter(agent=planner, messages=planner_messages, agent_id="planner", agent_name="PlannerAgent"),
-        LangChainAgentAdapter(agent=executor, messages=executor_messages, agent_id="executor", agent_name="ExecutorAgent"),
-    ],
-    system_name="MyAgentSystem",
-    system_description="...",
-    provider="gemini",
-    model="gemini-2.5-pro",
-    api_key="YOUR_API_KEY",
-)
 ```
 
 ---

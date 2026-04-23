@@ -57,49 +57,72 @@ Requires Python 3.10+.
 
 ## Quickstart
 
-### With LangChain agents (direct integration)
+If your system is built with LangChain/LangGraph, pass your agents and their message histories directly — no database needed.
 
 ```python
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.tools import tool
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.prebuilt import create_react_agent
+
 from poirot import run_poirot_from_agents, LangChainAgentAdapter
 
+# 1. Define your tools
+@tool
+def search_web(query: str) -> str:
+    """Search the web for information."""
+    return "Results for: " + query
+
+@tool
+def summarize(text: str) -> str:
+    """Summarize a block of text."""
+    return "Summary: " + text[:80]
+
+# 2. Create your agents
+llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", api_key="YOUR_API_KEY")
+researcher = create_react_agent(llm, tools=[search_web])
+writer     = create_react_agent(llm, tools=[summarize])
+
+# 3. Provide the message history from a failed session
+researcher_messages = [
+    HumanMessage(content="Find information about the Q3 earnings report."),
+    AIMessage(content="Searching...", tool_calls=[{"name": "search_web", "args": {"query": "Q3 earnings"}, "id": "c1", "type": "tool_call"}]),
+    ToolMessage(content="Q3 revenue: $4.2B, down 8% YoY.", tool_call_id="c1", name="search_web"),
+    AIMessage(content="Handing off to WriterAgent."),  # BUG: omits the 8% decline
+]
+
+writer_messages = [
+    HumanMessage(content="Q3 revenue was $4.2B.", name="researcher"),  # decline not mentioned
+    AIMessage(content="Summary: Q3 revenue reached $4.2B, a strong quarter."),  # incorrect framing
+]
+
+# 4. Run POIROT
 results = run_poirot_from_agents(
     agents=[
-        LangChainAgentAdapter(agent=planner, messages=planner_messages, agent_id="planner", agent_name="PlannerAgent"),
-        LangChainAgentAdapter(agent=executor, messages=executor_messages, agent_id="executor", agent_name="ExecutorAgent"),
+        LangChainAgentAdapter(agent=researcher, messages=researcher_messages, agent_id="researcher", agent_name="ResearcherAgent"),
+        LangChainAgentAdapter(agent=writer,     messages=writer_messages,     agent_id="writer",     agent_name="WriterAgent"),
     ],
-    system_name="MyAgentSystem",
-    system_description="...",
+    system_name="ResearchPipeline",
+    system_description="""
+        Two-agent research pipeline:
+        - ResearcherAgent: searches the web and summarizes findings for WriterAgent
+        - WriterAgent: receives the summary and produces the final report
+    """,
     provider="gemini",
     model="gemini-2.5-pro",
     api_key="YOUR_API_KEY",
 )
-```
 
-### With a SQLite database (any system, any language)
-
-```python
-import poirot
-
-results = poirot.run_poirot(
-    database_path="my_system.db",
-    system_name="MyAgentSystem",
-    system_description="""
-        A 3-agent pipeline:
-        - PlannerAgent: decomposes the user request into subtasks
-        - ExecutorAgent: executes each subtask using tools
-        - ReviewerAgent: validates the output before delivery
-    """,
-    provider="gemini",
-    api_key="YOUR_API_KEY",
-)
-
+# 5. Read the verdict
 c = results["consensus"]
 if c["is_tie"]:
-    print(f"TIE between: {', '.join(c['tied_components'])}")
+    print(f"TIE between     : {', '.join(c['tied_components'])}")
 else:
-    print(f"Faulty component : {c['faulty_component']}")
-print(f"Confidence       : {c['confidence_pct']:.1f}%")
+    print(f"Faulty component: {c['faulty_component']}")
+print(f"Confidence      : {c['confidence_pct']:.1f}%")
 ```
+
+**Not using LangChain?** If your agents are built with a different framework or in-house, log their messages to a SQLite database and use `run_poirot()` instead — it works with any system, any language. See the [database integration guide](https://github.com/11inaki11/POIROT/wiki/Integration-Database).
 
 ---
 

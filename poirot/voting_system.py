@@ -110,41 +110,23 @@ def find_agent_position(agent_name: str, error_regions: List[Dict]) -> List[int]
     Raises:
         ValueError: If agent name not found in error_regions
     """
-    # Normalize agent name for comparison (case insensitive, strip whitespace)
+    # Exact matches only: first against region ids (Phase I is required to use the
+    # agent ids), then against region names. Substring matching is not used because
+    # it can bind an agent to the wrong region (e.g. "physio" -> "physio_data_stream").
     norm_name = agent_name.lower().strip()
-    
-    for i, region in enumerate(error_regions):
-        # Check against name
-        if region.get('name', '').lower().strip() == norm_name:
-            position = [0] * len(error_regions)
-            position[i] = 1
-            return position
-        # Check against ID
-        if region.get('id', '').lower().strip() == norm_name:
-            position = [0] * len(error_regions)
-            position[i] = 1
-            return position
-            
-    # Try partial match if exact match fails
-    for i, region in enumerate(error_regions):
-        r_name = region.get('name', '').lower()
-        r_id = region.get('id', '').lower()
-        
-        if norm_name in r_name or r_name in norm_name:
-            position = [0] * len(error_regions)
-            position[i] = 1
-            return position
-            
-        if norm_name in r_id or r_id in norm_name:
-            position = [0] * len(error_regions)
-            position[i] = 1
-            return position
-    
-    # Agent not found - raise error with helpful message
-    available_agents = [r['name'] for r in error_regions]
-    # Instead of raising, return zero vector (neutral position) to prevent crash
-    print(f"⚠️  Warning: Agent '{agent_name}' not found in error_regions. Using neutral position.")
-    return [0] * len(error_regions)
+
+    for key in ('id', 'name'):
+        for i, region in enumerate(error_regions):
+            if str(region.get(key, '')).lower().strip() == norm_name:
+                position = [0] * len(error_regions)
+                position[i] = 1
+                return position
+
+    available = [r.get('id', '?') for r in error_regions]
+    raise ValueError(
+        f"Agent '{agent_name}' has no region in the hazard space (region ids: {available}). "
+        "Its vote cannot be weighted."
+    )
 
 
 def vector_to_string(vector: List[int]) -> str:

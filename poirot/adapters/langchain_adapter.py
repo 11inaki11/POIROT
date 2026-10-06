@@ -72,6 +72,9 @@ class LangChainAgentAdapter:
                    run_poirot_from_agents). E.g. "gemini", "openai", "deepseek".
         model:     Model name for this agent (overrides the global default).
         api_key:   API key for this agent's provider (overrides the global default).
+        system_prompt: The agent's role prompt. Phase 2 rebuilds each agent from
+                   this prompt, so it must be provided for the agent to keep its
+                   role. If None, a leading SystemMessage in ``messages`` is used.
     """
     agent: Any
     messages: List[BaseMessage]
@@ -82,6 +85,7 @@ class LangChainAgentAdapter:
     provider: Optional[str] = None
     model: Optional[str] = None
     api_key: Optional[str] = None
+    system_prompt: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +185,40 @@ def _build_ai_sender_map(adapters: List[LangChainAgentAdapter]) -> Dict[int, str
     return sender_map
 
 
+def _build_ai_recipient_map(
+    adapters: List[LangChainAgentAdapter], ai_sender_map: Dict[int, str]
+) -> Dict[Tuple[int, str], str]:
+    """
+    Map (content_hash, sender_id) → recipient agent_id: an AIMessage of agent A is
+    addressed to agent B when B's history contains a HumanMessage with the same
+    content whose sender is A.
+    """
+    recipient_map: Dict[Tuple[int, str], str] = {}
+    for adapter in adapters:
+        for msg in adapter.messages:
+            if isinstance(msg, HumanMessage) and msg.content:
+                sender = _infer_sender(msg, adapter.agent_id, ai_sender_map)
+                recipient_map.setdefault((hash(msg.content), sender), adapter.agent_id)
+    return recipient_map
+
+
+def _resolve_system_prompt(adapter: LangChainAgentAdapter) -> str:
+    """Explicit system_prompt, else the content of a leading SystemMessage, else ""."""
+    if adapter.system_prompt is not None:
+        return adapter.system_prompt
+    if adapter.messages and isinstance(adapter.messages[0], SystemMessage):
+        content = adapter.messages[0].content
+        return content if isinstance(content, str) else str(content)
+    return ""
+
+
+def _with_metadata(msg: BaseMessage, from_agent: str, to_agent: str) -> BaseMessage:
+    """Return a copy of msg carrying POIROT routing metadata (the original is not mutated)."""
+    kwargs = dict(msg.additional_kwargs or {})
+    kwargs["metadata"] = {"from_node": from_agent, "to_node": to_agent, "timestamp": ""}
+    return msg.model_copy(update={"additional_kwargs": kwargs})
+
+
 def _infer_sender(msg: BaseMessage, this_agent_id: str, ai_sender_map: Dict[int, str]) -> str:
     """Return the best-guess sender agent_id for a message."""
     # Priority 1: explicit name field (LangGraph multi-agent style)
@@ -202,10 +240,14 @@ def _infer_sender(msg: BaseMessage, this_agent_id: str, ai_sender_map: Dict[int,
 def build_session_data(
     adapters: List[LangChainAgentAdapter],
     system_name: str = "langchain_system",
+    include_tool_calls: bool = False,
 ) -> Tuple[List[ProcessedMessage], List[BaseMessage], Dict[str, Any]]:
     """
     Convert a list of LangChainAgentAdapters into POIROT's internal session
     representation.
+
+    Tool results are only added to the Phase 2 history when include_tool_calls
+    is True (Phase 1 applies the same flag when cleaning its context).
 
     Returns:
         processed_messages: List[ProcessedMessage] for Phase 1.
@@ -214,15 +256,18 @@ def build_session_data(
     """
     adapters = _resolve_names_and_ids(adapters)
     ai_sender_map = _build_ai_sender_map(adapters)
+    ai_recipient_map = _build_ai_recipient_map(adapters, ai_sender_map)
 
     processed_messages: List[ProcessedMessage] = []
     historical_messages: List[BaseMessage] = []
     seen_historical: set = set()   # (content_hash, from_node, to_node)
+    seen_processed: set = set()    # same key: A's output and B's copy of it are one message
     agents_configs: Dict[str, Any] = {}
 
     for adapter in adapters:
         agent_id = adapter.agent_id
         agent_name = adapter.agent_name
+        system_prompt = _resolve_system_prompt(adapter)
 
         # Resolve tools
         raw_tools = adapter.tools if adapter.tools is not None else _extract_tools_from_agent(adapter.agent)
@@ -234,7 +279,7 @@ def build_session_data(
             agent_name=agent_name,
             agent_type=adapter.agent_type,
             system_name=system_name,
-            system_prompt="",       # system prompt is internal to the compiled agent
+            system_prompt=system_prompt,
             llm_model="",           # LLM is internal to the compiled agent
             temperature=0.0,
             max_tokens=8000,
@@ -245,7 +290,7 @@ def build_session_data(
         agents_configs[agent_id] = {
             "name": agent_name,
             "config": config,
-            "system_prompt": "",            # internal to the compiled agent
+            "system_prompt": system_prompt, # role prompt used to rebuild the agent in Phase 2
             "compiled_agent": adapter.agent,# the original compiled graph
             "provider": adapter.provider,   # per-agent LLM override (None = use global)
             "model": adapter.model,         # per-agent model override (None = use global)
@@ -256,8 +301,14 @@ def build_session_data(
             "can_communicate_with": config.can_communicate_with,
         }
 
-        # Process each message
-        for msg in adapter.messages:
+        # Process each message. A leading SystemMessage used as the role prompt
+        # is not part of the session log.
+        session_msgs = adapter.messages
+        if (adapter.system_prompt is None and session_msgs
+                and isinstance(session_msgs[0], SystemMessage)):
+            session_msgs = session_msgs[1:]
+
+        for msg in session_msgs:
             content = msg.content if isinstance(msg.content, str) else str(msg.content)
             if not content or not content.strip():
                 continue
@@ -265,13 +316,15 @@ def build_session_data(
             # Determine routing
             if isinstance(msg, AIMessage):
                 from_agent = agent_id
-                to_agent = "unknown"
+                to_agent = ai_recipient_map.get((hash(msg.content), agent_id), "unknown")
                 msg_type = "ai"
                 is_tool_call = bool(getattr(msg, "tool_calls", None))
                 tool_name = msg.tool_calls[0].get("name") if is_tool_call and msg.tool_calls else None
 
             elif isinstance(msg, ToolMessage):
-                from_agent = agent_id
+                # Tool results are sent by the tool to the agent (not self-talk),
+                # matching the "tool_<name>" convention used in Phase 2.
+                from_agent = f"tool_{getattr(msg, 'name', None) or 'unknown'}"
                 to_agent = agent_id
                 msg_type = "tool"
                 is_tool_call = False
@@ -292,9 +345,13 @@ def build_session_data(
                 is_tool_call = False
                 tool_name = None
 
-            # Build ProcessedMessage for Phase 1
+            # Build ProcessedMessage for Phase 1 (deduplicated)
+            dedup_key = (hash(content), from_agent, to_agent)
+            if dedup_key in seen_processed:
+                continue
+            seen_processed.add(dedup_key)
             pm = ProcessedMessage(
-                message=msg,
+                message=_with_metadata(msg, from_agent, to_agent),
                 from_agent=from_agent,
                 to_agent=to_agent,
                 msg_type=msg_type,
@@ -305,7 +362,8 @@ def build_session_data(
             processed_messages.append(pm)
 
             # Build historical message for Phase 2 (deduplicated)
-            dedup_key = (hash(content), from_agent, to_agent)
+            if msg_type == "tool" and not include_tool_calls:
+                continue
             if dedup_key not in seen_historical:
                 seen_historical.add(dedup_key)
                 # Clone with metadata

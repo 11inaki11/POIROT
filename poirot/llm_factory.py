@@ -101,8 +101,9 @@ class LLMFactory:
         Returns:
             ChatGoogleGenerativeAI or ChatOpenAI instance
         """
-        # Legacy support: use_local=True is equivalent to provider="local"
-        if use_local:
+        # Legacy support: use_local=True is equivalent to provider="local" (LM Studio),
+        # except when an explicit local provider such as "ollama" is requested.
+        if use_local and provider != "ollama":
             provider = "local"
         
         if provider == "local":
@@ -286,7 +287,7 @@ class LLMFactory:
         Returns:
             Descriptive string like "gemini-2.5-flash (API)" or "deepseek-chat (DeepSeek API)"
         """
-        if use_local:
+        if use_local and provider != "ollama":
             provider = "local"
             
         if provider == "local":

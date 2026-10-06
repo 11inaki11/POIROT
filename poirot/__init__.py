@@ -295,7 +295,7 @@ def run_poirot_from_agents(
     # and will be used directly in Phase 1 and Phase 2 — no new LLM instances are
     # created for the agents themselves.
     processed_messages, historical_messages, agents_configs = build_session_data(
-        agents, system_name=system_name
+        agents, system_name=system_name, include_tool_calls=include_tool_calls
     )
 
     # Phase 0: Build error vector space

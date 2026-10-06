@@ -27,7 +27,7 @@ except ImportError:
     try:
         from .llm_factory import LLMFactory
     except ImportError:
-        _p("WARNING Could not import LLMFactory. Only Gemini API will be available.")
+        print("WARNING Could not import LLMFactory. Only Gemini API will be available.")
         LLMFactory = None
 
 # Import token tracker
@@ -85,6 +85,15 @@ Restrictions:
 - If an element integrates hardware and software, identify it as a single error region unless separation is absolutely necessary.
 - Error regions must be limited. Defining an error region for a global failure or one that affects many regions, such as “similar system failure,” is not valid and is considered an error.  
 
+Description field guidelines (CRITICAL):
+- The "description" for each error region must describe DETECTABLE ANOMALOUS BEHAVIOURS, not generic risks or normal role characteristics.
+- Do NOT describe what the component normally does or what its inherent limitations are. Instead, describe what it would look like if this component were the source of a fault.
+- Use the format: "Error signature: [observable anomaly that distinguishes this component as the error source]. Normal behaviour: [what this component should do when functioning correctly]."
+- The description must be specific enough that a peer agent reading a session log could recognise whether the described anomaly is present or absent.
+- Avoid vague descriptions such as "potential errors in analysis" or "may introduce bias" — these apply equally to all agents and provide no diagnostic value.
+- For agents: describe how their output would deviate from their defined role (e.g., wrong conclusions contradicting their own data, recommendations opposite to their mandate, content inconsistent with the agent's function).
+- For hardware/software/data components: describe what corrupted, absent, or malformed output would look like in the session log.
+
 Output requirement:
 - You MUST output ONLY valid JSON and nothing else.
 - Use the following schema:
@@ -96,7 +105,7 @@ Output requirement:
       "id": "<snake_case_identifier>",  // IMPORTANT: For agents, use snake_case version of name (e.g., "Portfolio Manager" -> "portfolio_manager")
       "name": "<error region name>",
       "type": "<agent | hardware | software | physical | human | other>",
-      "description": "<brief explanation of why this region could be a potential source of error>"
+      "description": "<Error signature: [observable anomaly]. Normal behaviour: [expected behaviour when correct].>"
     }
     // ...
   ],

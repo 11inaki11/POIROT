@@ -14,9 +14,9 @@ Version: 1.0
 Date: December 2025
 """
 
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
 import json
 import os
 
@@ -114,6 +114,37 @@ Output requirement:
 """
 
 
+class HazardSpaceMismatchError(ValueError):
+    """The Phase I hazard space does not contain exactly one region per agent id."""
+
+
+def format_required_agent_regions(agents: List[Dict[str, str]]) -> str:
+    """Instruction that forces one agent region per agent, using the given ids."""
+    lines = "\n".join(f'- id: "{a["id"]}"  (name: {a.get("name", a["id"])})' for a in agents)
+    return (
+        "REQUIRED AGENT REGIONS:\n"
+        "The system contains exactly the following agents. For EACH of them include exactly one "
+        "error region of type \"agent\" whose \"id\" is EXACTLY the id given below (same spelling "
+        "and case; do not rename, translate, merge or split them). Do not create any other region "
+        "of type \"agent\". Non-agent regions (hardware, software, human, ...) are defined as usual.\n"
+        + lines
+    )
+
+
+def find_agent_region_problems(error_space: Dict[str, Any], agent_ids: List[str]) -> List[str]:
+    """Return the reasons why error_space does not map every agent id to one region (empty if OK)."""
+    regions = error_space.get("error_regions") or []
+    region_ids = [str(r.get("id", "")) for r in regions]
+    problems = []
+    missing = [a for a in agent_ids if a not in region_ids]
+    if missing:
+        problems.append(f"missing region ids for agents {missing} (got ids {region_ids})")
+    duplicated = sorted({a for a in agent_ids if region_ids.count(a) > 1})
+    if duplicated:
+        problems.append(f"agent ids used by more than one region: {duplicated}")
+    return problems
+
+
 class POIROTAgent:
     """POIROT helper agent to identify potential error locations in a multi-agent system.
 
@@ -166,7 +197,13 @@ class POIROTAgent:
         # Vectors to ignore: a list of human-readable strings that should NOT be treated as potential error regions
         self.vectors_to_ignore: List[str] = vectors_to_ignore or []
 
-    def analyze_system(self, system_description: str, ignore_list: Optional[List[str]] = None, verbose: bool = True) -> Dict[str, Any]:
+    def analyze_system(
+        self,
+        system_description: str,
+        ignore_list: Optional[List[str]] = None,
+        verbose: bool = True,
+        agents: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, Any]:
         """Run the POIROT pre-analysis on a textual description of a multi-agent system.
 
         This method sends the system description to the LLM and receives a structured
@@ -177,6 +214,11 @@ class POIROTAgent:
                               including agents, workflow, components, etc.
             ignore_list: Optional list of components to exclude from analysis.
                         If provided, overrides the constructor's vectors_to_ignore.
+            agents: Optional list of the system's agents as ``{"id": ..., "name": ...}``.
+                    When given, the LLM must create exactly one region per agent using
+                    that exact ``id`` (the id is what votes are weighted against). The
+                    result is validated; on a mismatch the LLM gets one chance to fix
+                    it and a :class:`HazardSpaceMismatchError` is raised otherwise.
 
         Returns:
             Dictionary containing:
@@ -189,6 +231,8 @@ class POIROTAgent:
                 - error_vector_example: Example binary vector showing error encoding
 
         Raises:
+            HazardSpaceMismatchError: If ``agents`` is given and the regions still do
+                not contain every agent id after one correction attempt.
             Exception: If LLM invocation fails or response cannot be parsed
         """
         _p = print if verbose else (lambda *a, **kw: None)
@@ -212,6 +256,9 @@ class POIROTAgent:
         if ignore_message:
             messages.append(HumanMessage(content=ignore_message))
 
+        if agents:
+            messages.append(HumanMessage(content=format_required_agent_regions(agents)))
+
         # Initialize LLM lazily (so importing the module does not require credentials)
         if self.llm is None:
             if LLMFactory is not None:
@@ -226,31 +273,69 @@ class POIROTAgent:
             else:
                 self.llm = ChatGoogleGenerativeAI(model=self.model, temperature=0, max_tokens=32000)
 
+        result, raw = self._invoke_and_parse(messages, _p)
+        if not agents or "error" in result:
+            return result
+
+        agent_ids = [a["id"] for a in agents]
+        problems = find_agent_region_problems(result, agent_ids)
+        if problems:
+            # One correction attempt: show the model its answer and what is wrong.
+            _p(f"    WARNING Hazard space does not match the agents ({'; '.join(problems)}). Asking for a fix...")
+            messages += [
+                AIMessage(content=raw),
+                HumanMessage(content=(
+                    "Your error space is invalid: " + "; ".join(problems) + ".\n"
+                    + format_required_agent_regions(agents)
+                    + "\nReturn the complete corrected JSON."
+                )),
+            ]
+            result, _ = self._invoke_and_parse(messages, _p)
+            if "error" in result:
+                return result
+            problems = find_agent_region_problems(result, agent_ids)
+            if problems:
+                raise HazardSpaceMismatchError(
+                    "The hazard space built in Phase I does not match the system's agents: "
+                    + "; ".join(problems)
+                )
+        return result
+
+    def _invoke_and_parse(self, messages: List[Any], _p) -> Tuple[Dict[str, Any], str]:
+        """Invoke the LLM and parse its JSON answer. Returns (result, raw_content)."""
         response = self.llm.invoke(messages)
-        
+
         # Track tokens if tracker is available
         if self.token_tracker is not None and extract_tokens_from_response is not None:
             usage = extract_tokens_from_response(response)
             self.token_tracker.add(usage)
             _p(f"    Tokens used: {usage.total_tokens} (input: {usage.input_tokens}, output: {usage.output_tokens})")
 
+        raw = response.content if isinstance(response.content, str) else str(response.content)
+
         # The model MUST return JSON only; try to parse it
         try:
-            parsed = json.loads(response.content)
-            return parsed
+            return json.loads(raw), raw
         except Exception:
             # Try to extract JSON block if the model wrapped it in markdown
             import re
-            m = re.search(r'```json\s*(\{.*?\})\s*```', response.content, re.DOTALL)
+            m = re.search(r'```json\s*(\{.*?\})\s*```', raw, re.DOTALL)
             if m:
                 try:
-                    return json.loads(m.group(1))
+                    return json.loads(m.group(1)), raw
+                except Exception:
+                    pass
+            # Last resort: the first JSON object embedded in surrounding text
+            if "{" in raw:
+                try:
+                    obj, _ = json.JSONDecoder().raw_decode(raw[raw.index("{"):])
+                    if isinstance(obj, dict):
+                        return obj, raw
                 except Exception:
                     pass
 
         # If parsing failed, return raw content under an error key
-        result = {"error": "Could not parse LLM response as JSON", "raw": response.content}
-        return result
+        return {"error": "Could not parse LLM response as JSON", "raw": raw}, raw
 
     def save_output(self, parsed: Dict[str, Any], file_path: str) -> bool:
         """Save the parsed output dictionary to a JSON file.

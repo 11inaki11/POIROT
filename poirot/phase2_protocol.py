@@ -830,18 +830,20 @@ Each position represents a specific component or agent in the system.
     explanation = "\nERROR VECTOR STRUCTURE:\n"
     explanation += "The error vector is a binary array where each position represents a specific component.\n"
     explanation += "Each position can be 0 (not involved) or 1 (potentially involved). You can mark multiple positions as 1, but focus on the root cause, not where the error propagates.\n\n"
-    explanation += "Vector positions and their meaning:\n"
-    
-    for region in error_regions:
+    explanation += "Vector positions and their meaning (INDEX — id: Name):\n"
+
+    for i, region in enumerate(error_regions):
         region_id = region.get('id', '?')
         region_name = region.get('name', 'Unknown')
         region_desc = region.get('description', 'No description available')
-        explanation += f"  {region_id}: {region_name}\n"
+        explanation += f"  [{i}] {region_id}: {region_name}\n"
         explanation += f"      {region_desc}\n\n"
-    
+
     example_vector = error_space.get('error_vector_example', [0] * len(error_regions))
     explanation += f"Example vector: {example_vector}\n"
-    
+    explanation += "  → In this example, positions with value 1 indicate the components involved.\n"
+    explanation += "  → When building your 'location' array, position 0 corresponds to the first component listed above, position 1 to the second, and so on.\n"
+
     return explanation
 
 
@@ -862,14 +864,17 @@ def generate_location_field_instructions(error_space: Dict[str, Any]) -> str:
     n = len(error_regions)
     
     instructions = f"\nLOCATION FIELD FORMAT:\n"
-    instructions += f"The 'location' field must be a binary array of length {n}, where each position corresponds to:\n"
-    
+    instructions += f"The 'location' field must be a binary array of EXACTLY {n} elements.\n"
+    instructions += f"Each index maps directly to a component (DO NOT shift or reorder):\n\n"
+
     for i, region in enumerate(error_regions):
-        instructions += f"  Position {i}: {region.get('name', 'Unknown')} ({region.get('id', '?')})\n"
-    
-    instructions += "\nSet position to 1 if that component contributed to the hazard, 0 otherwise.\n"
-    instructions += "Example: [0, 0, 1, 0] indicates only the 3rd component was involved.\n"
-    
+        instructions += f"  location[{i}] = 1  →  {region.get('name', 'Unknown')}  (id: {region.get('id', '?')})\n"
+
+    instructions += "\nSet an element to 1 if that component originated or directly caused the hazard.\n"
+    instructions += "Set all other elements to 0.\n"
+    instructions += "Set ALL elements to 0 if you observed no clear anomaly.\n"
+    instructions += f"\nCorrect-length example (n={n}): {[0]*n}  (all zeros = no anomaly detected)\n"
+
     return instructions
 
 
@@ -906,6 +911,16 @@ HOW IT WORKS:
 3. The POIROT server will mediate these communications to ensure orderly discussion
 4. After consultation, you will provide your final hazard vector identification
 
+WHAT YOU ARE LOOKING FOR:
+You are identifying BEHAVIOURAL ANOMALIES — deviations from the expected functioning of any component in the system. The source of an anomaly can be:
+- An agent producing output that contradicts its own inputs, violates its defined role, or is semantically inconsistent with what other agents report
+- A software component returning corrupted, absent, or malformed data
+- A hardware component producing erroneous readings or failing to operate within specification
+- A human actor behaving in a way inconsistent with their defined role or responsibilities
+- An external data source providing values that are implausible, anachronistic, or internally contradictory
+
+Do NOT confuse behavioural anomalies with domain-level risks or operational concerns. You are diagnosing the system itself — which component behaved in a way it should not have — not evaluating the quality of decisions in the normal course of operations.
+
 IMPORTANT RULES:
  DO consult with other agents before your final report
  DO ask specific, focused questions based on evidence
@@ -914,11 +929,13 @@ IMPORTANT RULES:
  DON'T skip consultation - it's mandatory
  DON'T provide your final vote until you've gathered sufficient information
  DON'T repeat the same question multiple times if you don't get an answer immediately. Wait for the response.
- IF an incident is caused because a conflict between two agents happened, you must indicate both agents as responsible for the incident, not as systematic causes.
 
 {vector_explanation}
 
-You can indicate more than one region as responsible for the incident by marking its hazard vector element as 1. It is important to differentiate between elements that may have triggered an error and simple elements that are normal and expected in the system. In addition, it has several points of failure, so do not hesitate to indicate them all. You should point to the real cause, not be general, and indicate multiple failures.
+VOTING GUIDANCE — READ CAREFULLY:
+1. VOTE THE ROOT CAUSE ONLY. If one component's malfunction caused downstream effects in other components, vote ONLY the original source. Do not vote the components that were merely affected by the upstream failure — they are victims, not causes.
+2. VOTE MULTIPLE COMPONENTS only when you have identified truly independent, simultaneous error sources — i.e., two or more components that each produced anomalous behaviour on their own, not as a consequence of one another.
+3. IF YOU OBSERVED NO CLEAR ANOMALY, vote all zeros. This is a valid and important answer. Do not invent a hazard location if the evidence does not support one.
 
 FINAL OUTPUT FORMAT:
 After consultation, your response MUST be a valid JSON object:
@@ -930,8 +947,6 @@ After consultation, your response MUST be a valid JSON object:
 
 {location_instructions}
 
-
-
 CRITICAL: Base your analysis ONLY on evidence from the session. If you didn't observe something directly, clarify this in your justification. Focus on the root cause, not where the error propagated.
 
 Begin your consultation now using the available communication tools. If you have already asked a question, wait for the response or ask a different agent.
@@ -941,27 +956,90 @@ Begin your consultation now using the available communication tools. If you have
 def format_phase1_observations(phase1_reports: Dict[str, str]) -> str:
     """
     Format Phase 1 individual reports for Phase 2 context.
-    
+    Parses the new structured JSON format (self_evaluation + peer_observations + suspected_agents)
+    and builds a concise, scannable summary for agents entering Phase 2.
+
     Args:
         phase1_reports: Dict mapping agent_id to their Phase 1 report text
-        
+
     Returns:
         Formatted context message with all Phase 1 observations
     """
     if not phase1_reports:
         return ""
-    
+
     formatted = "\n" + "═"*80 + "\n"
-    formatted += "PHASE 1 INDIVIDUAL OBSERVATIONS (for your reference)\n"
-    formatted += "═"*80 + "\n\n"
-    
-    for agent_id, report in phase1_reports.items():
-        formatted += f"-- {agent_id.upper()} --\n"
-        formatted += f"{report}\n\n"
-    
+    formatted += "PHASE 1 STRUCTURED OBSERVATIONS — SUMMARY FOR PEER CONSULTATION\n"
     formatted += "═"*80 + "\n"
-    formatted += "These are the initial observations from all agents. Use them to inform your consultation.\n"
-    
+    formatted += "Each agent completed an independent self + peer evaluation in Phase 1.\n"
+    formatted += "Their findings are summarised below. Use these as your starting point for consultation.\n\n"
+
+    # Collect all suspected agents across all reporters for a quick headline
+    all_suspected: Dict[str, list] = {}  # suspected_agent -> list of reporters
+
+    for agent_id, report in phase1_reports.items():
+        formatted += f"-- {agent_id.upper()} (Phase 1 report) --\n"
+
+        # Try to parse structured JSON
+        parsed = None
+        try:
+            json_match = re.search(r'\{[\s\S]*"self_evaluation"[\s\S]*\}', report)
+            if json_match:
+                parsed = json.loads(json_match.group(0))
+        except Exception:
+            pass
+
+        if parsed:
+            # Self evaluation
+            se = parsed.get("self_evaluation", {})
+            role_ok = se.get("role_fulfilled", True)
+            self_anomaly = se.get("anomalies_detected", False)
+            se_desc = se.get("description", "")
+            se_ev = se.get("evidence", "N/A")
+            if self_anomaly:
+                formatted += f"  SELF: WARNING  ANOMALY DETECTED — {se_desc}\n"
+                formatted += f"        Evidence: {se_ev}\n"
+            else:
+                formatted += f"  SELF: OK  Role fulfilled — {se_desc}\n"
+
+            # Peer observations
+            peers = parsed.get("peer_observations", [])
+            if peers:
+                formatted += f"  PEER OBSERVATIONS ({len(peers)}):\n"
+                for obs in peers:
+                    a_name = obs.get("agent_name", "?")
+                    desc = obs.get("description", "")
+                    ev = obs.get("evidence", "")
+                    formatted += f"    - {a_name}: {desc}\n"
+                    if ev and ev != "N/A":
+                        formatted += f"      Evidence: {ev}\n"
+            else:
+                formatted += "  PEER OBSERVATIONS: none flagged\n"
+
+            # Suspected agents
+            suspects = parsed.get("suspected_agents", [])
+            if suspects:
+                formatted += f"  SUSPECTS: {', '.join(suspects)}\n"
+                for s in suspects:
+                    all_suspected.setdefault(s, []).append(agent_id)
+            else:
+                formatted += "  SUSPECTS: none\n"
+        else:
+            # Fallback: raw text (legacy or parse failure)
+            formatted += f"{report[:800]}\n"
+
+        formatted += "\n"
+
+    # Headline consensus summary
+    if all_suspected:
+        formatted += "-"*80 + "\n"
+        formatted += "CROSS-AGENT CONSENSUS (agents flagged by multiple peers in Phase 1):\n"
+        for suspect, reporters in sorted(all_suspected.items(), key=lambda x: -len(x[1])):
+            formatted += f"  - {suspect} — flagged by {len(reporters)} agent(s): {', '.join(reporters)}\n"
+
+    formatted += "═"*80 + "\n"
+    formatted += "Use the above findings to direct your consultation. Ask targeted questions to confirm or refute these observations.\n"
+
     return formatted
 
 

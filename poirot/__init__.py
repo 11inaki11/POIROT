@@ -306,9 +306,14 @@ def run_poirot_from_agents(
         local_model_name=local_model_name,
         llm_provider=provider,
     )
+    # Each agent must own exactly one region whose id is its agent_id: votes are
+    # weighted by the distance between that region and the voted vector.
     error_space = poirot_agent.analyze_system(
-        system_description, ignore_list=ignore_list, verbose=verbose
+        system_description, ignore_list=ignore_list, verbose=verbose,
+        agents=[{"id": aid, "name": data["name"]} for aid, data in agents_configs.items()],
     )
+    if "error" in error_space:
+        raise RuntimeError(f"Phase 0 failed: {error_space['error']}")
 
     # Phase 1: Individual analysis (no agent factory — agentless mode)
     phase1_result = execute_phase1_analysis(

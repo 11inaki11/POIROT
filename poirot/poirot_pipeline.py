@@ -240,9 +240,16 @@ class POIROTPipeline:
         
         self._p("\n... Running POIROT Agent analysis...")
         
+        # The agents that will vote in Phase 2 must each own the region whose id is
+        # their agent_id, so the hazard space is built against that list.
+        session_agents = self._get_voting_agents()
+        self._p(f"   Agents (required region ids): {[a['id'] for a in session_agents]}")
+
         result = self.poirot_agent.analyze_system(
             self.system_description,
-            ignore_list=self.ignore_list
+            ignore_list=self.ignore_list,
+            verbose=self.verbose,
+            agents=session_agents,
         )
         
         # Check for errors
@@ -1016,6 +1023,23 @@ class POIROTPipeline:
             self._p(f"   WARNING  Error loading messages: {e}")
             return []
     
+    def _get_voting_agents(self) -> List[Dict[str, str]]:
+        """Agents that vote in Phase 2 for the analyzed session, as {"id", "name"}.
+
+        Uses the same selection as Phase 2 (get_agents_for_session on the target
+        session) so that Phase 0 can require one region per voting agent.
+        """
+        try:
+            from .session_agent_loader import get_agents_for_session
+        except ImportError:
+            from session_agent_loader import get_agents_for_session
+
+        agents_data, agent_order = get_agents_for_session(
+            db_path=str(Path(self.database_path)),
+            session_id=self._get_session_id(),
+        )
+        return [{"id": aid, "name": agents_data[aid].get("name", aid)} for aid in agent_order]
+
     def _get_session_id(self) -> str:
         """Get session ID from database.
         

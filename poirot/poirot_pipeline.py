@@ -31,13 +31,13 @@ try:
     from .poirot_agent import POIROTAgent
     from .agent_factory import AgentFactory
     from .phase1_protocol import execute_phase1_analysis
-    from .phase2_protocol import execute_phase2_analysis
+    from .phase2_protocol import execute_phase2_analysis, resolve_mode
     from .token_tracker import TokenTracker
 except ImportError:
     from poirot_agent import POIROTAgent
     from agent_factory import AgentFactory
     from phase1_protocol import execute_phase1_analysis
-    from phase2_protocol import execute_phase2_analysis
+    from phase2_protocol import execute_phase2_analysis, resolve_mode
     from token_tracker import TokenTracker
 
 
@@ -84,6 +84,8 @@ class POIROTPipeline:
         retry_delay_503: int = 30,
         retry_delay_429: int = 60,
         verbose: bool = True,
+        mode: str = "C1",
+        max_parallel_votes: int = 1,
     ):
         """Initialize the POIROT pipeline.
 
@@ -101,6 +103,11 @@ class POIROTPipeline:
             llm_provider: LLM provider - "gemini", "deepseek", "local", or "ollama" (default: "gemini")
             ollama_num_ctx: Context window size for Ollama models (default: 131072 = 128K).
                             Ignored for non-Ollama providers.
+            mode: Protocol mode - "C0" (vote from the session log), "C1" (vote after
+                  the agent's own Phase 1 self-assessment, default), "C2" (vote after
+                  reading every agent's Phase 1 report) or "C3" (full protocol with
+                  peer interrogation).
+            max_parallel_votes: In modes C0-C2, number of agents voting concurrently.
         """
         self.system_name = system_name
         self.system_description = system_description
@@ -123,6 +130,8 @@ class POIROTPipeline:
         self.retry_delay_503 = retry_delay_503
         self.retry_delay_429 = retry_delay_429
         self.verbose = verbose
+        self.mode = resolve_mode(mode)
+        self.max_parallel_votes = max_parallel_votes
         self._p = print if verbose else (lambda *a, **kw: None)
         
         # Create output directory if it doesn't exist
@@ -134,6 +143,7 @@ class POIROTPipeline:
         self.agent_factory = None
         self.agents = None
         self.processed_messages = None  # Messages with metadata from agent factory
+        self.phase1_contexts = None
         self.graph = None
         self.analysis_results = None
         
@@ -529,6 +539,7 @@ class POIROTPipeline:
         # Store results
         if isinstance(phase1_result, dict) and 'reports' in phase1_result:
             self.analysis_results = phase1_result['reports']
+            self.phase1_contexts = phase1_result.get('contexts')
             if 'metadata' in phase1_result:
                 self.execution_metadata['phase1_metrics'] = phase1_result['metadata']
         else:
@@ -563,11 +574,11 @@ class POIROTPipeline:
             - output_files: List of created output file paths
         """
         self._p("\n" + "=" * 80)
-        self._p("PHASE 2: POIROT PHASE 2 PROTOCOL (PEER CONSULTATION)")
+        self._p("PHASE 2: POIROT PHASE 2 PROTOCOL" + (" (PEER CONSULTATION)" if self.mode == "C3" else f" (MODE {self.mode}: DIRECT VOTE)"))
         self._p("=" * 80)
         
         # Validate prerequisites
-        if self.analysis_results is None:
+        if self.analysis_results is None and self.mode != "C0":
             raise RuntimeError("Phase 1B (individual protocol) must be run before Phase 2")
         
         if self.error_vector_space is None:
@@ -599,6 +610,9 @@ class POIROTPipeline:
             retry_delay_503=self.retry_delay_503,
             retry_delay_429=self.retry_delay_429,
             token_budget=self.token_budget,
+            mode=self.mode,
+            phase1_contexts=self.phase1_contexts,
+            max_parallel_votes=self.max_parallel_votes,
         )
 
         # Store results
@@ -737,12 +751,14 @@ class POIROTPipeline:
         self._p(f"\nSystem: {self.system_name}")
         self._p(f"Database: {self.database_path}")
         self._p(f"Output: {self.output_dir}")
+        self._p(f"Mode: {self.mode}")
         self._p(f"Timestamp: {self.execution_metadata['pipeline_started']}")
         if self.session_id:
              self._p(f"Target Session: {self.session_id}")
         
         results = {
             "system_name": self.system_name,
+            "mode": self.mode,
             "metadata": self.execution_metadata
         }
         
@@ -758,8 +774,8 @@ class POIROTPipeline:
                 except NotImplementedError:
                     self._p("\nSKIP  Skipping Phase 1 (not implemented)")
             
-            # Phase 1B: POIROT Phase 1 Protocol (individual analysis)
-            if phases is None or "phase1_protocol" in phases:
+            # Phase 1B: POIROT Phase 1 Protocol (individual analysis); mode C0 votes without it
+            if (phases is None or "phase1_protocol" in phases) and self.mode != "C0":
                 try:
                     results["phase1_protocol"] = self.run_phase1_protocol()
                 except NotImplementedError:

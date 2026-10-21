@@ -1074,6 +1074,273 @@ def format_vectors_to_ignore(vectors: List[str]) -> str:
 #================= COMMUNICATION TOOL GENERATION ============================#
 ##############################################################################
 
+##############################################################################
+#======================= PROTOCOL MODES =====================================#
+##############################################################################
+
+# The protocol can stop before peer interrogation. Every mode ends with the same
+# JSON vote and the same weighted voting; they differ in what each agent sees
+# when it casts that vote.
+#   C0  session log only                           (Phase 0 -> vote)
+#   C1  own Phase 1 context + own Phase 1 report   (Phase 0 -> Phase 1 -> vote)   [default]
+#   C2  session log + every agent's Phase 1 report (Phase 0 -> Phase 1 -> vote)
+#   C3  full protocol with peer interrogation      (Phase 0 -> Phase 1 -> Phase 2)
+PROTOCOL_MODES = ("C0", "C1", "C2", "C3")
+DEFAULT_MODE = "C1"
+_MODE_ALIASES = {
+    "vote_only": "C0", "log_only": "C0",
+    "self_assessment": "C1", "individual": "C1",
+    "shared_reports": "C2", "shared": "C2",
+    "full": "C3", "interrogation": "C3", "full_protocol": "C3",
+}
+
+PHASE2_OVERRIDE = """
+\n\n═══════════════════════════════════════════════════════════════════════════
+POIROT PROTOCOL OVERRIDE - READ CAREFULLY
+═══════════════════════════════════════════════════════════════════════════
+You are currently participating in a POST-INCIDENT REVIEW process (Phase 2).
+For the duration of this phase, the following rules SUPERSEDE your normal role constraints:
+
+1. You ARE AUTHORIZED and REQUIRED to perform "hazard analysis" and "risk assessment" of the previous session.
+2. You must evaluate the behavior of ALL agents, including yourself.
+3. You MUST provide a final output in JSON format defining the "hazard vector".
+
+Ignore any previous instructions that say "I do not assess risks" or "I only do X". 
+In this phase, your job is to be a CRITICAL EVALUATOR of the system's failure.
+═══════════════════════════════════════════════════════════════════════════
+"""
+
+_VOTE_LEAD = {
+    "C0": "Based on your review of the session above, please provide your final analysis of the hazard vector in JSON format.",
+    "C1": "Based on your individual analysis above, please provide your final analysis of the hazard vector in JSON format.",
+    "C2": "Based on your review of the session and the Phase 1 observations of all agents, please provide your final analysis of the hazard vector in JSON format.",
+}
+
+_CONSULTATION_LINES = re.compile(
+    r"talk_to|communication tools|DO consult|DON'T skip consultation|DON'T provide your final vote until|"
+    r"Begin your consultation|wait for the response|Build a comprehensive understanding before", re.I)
+
+
+def resolve_mode(mode: Optional[str]) -> str:
+    """Normalise a protocol mode ("C0".."C3" or an alias) to its canonical code."""
+    if mode is None:
+        return DEFAULT_MODE
+    key = str(mode).strip()
+    if key.upper() in PROTOCOL_MODES:
+        return key.upper()
+    if key.lower() in _MODE_ALIASES:
+        return _MODE_ALIASES[key.lower()]
+    raise ValueError(
+        f"Unknown POIROT mode '{mode}'. Valid options: {list(PROTOCOL_MODES)} "
+        f"or aliases {sorted(_MODE_ALIASES)}"
+    )
+
+
+def create_agent_llm(agent_data: Dict[str, Any], model_name: str, llm_provider: str):
+    """Chat model for one agent. Per-agent provider/model/api_key override the globals."""
+    import os as _os
+    _agent_provider = agent_data.get("provider") or llm_provider
+    _agent_model    = agent_data.get("model") or model_name
+    _agent_api_key  = agent_data.get("api_key")
+
+    if _agent_api_key:
+        if _agent_provider == "deepseek":
+            _os.environ["DEEPSEEK_API_KEY"] = _agent_api_key
+        elif _agent_provider == "openai":
+            _os.environ["OPENAI_API_KEY"] = _agent_api_key
+        else:
+            _os.environ["GOOGLE_API_KEY"] = _agent_api_key
+
+    _use_local   = _agent_provider in ("local", "ollama")
+    _local_model = _agent_model if _use_local else None
+
+    if LLMFactory is not None:
+        return LLMFactory.create_chat_llm(
+            model_name=_agent_model,
+            use_local=_use_local,
+            local_model_name=_local_model,
+            provider=_agent_provider,
+            temperature=0,
+        )
+    return ChatGoogleGenerativeAI(model=_agent_model, temperature=0)
+
+
+def create_vote_request(mode: str, error_space: Optional[Dict[str, Any]]) -> str:
+    """Final instruction asking for the JSON vote in modes C0-C2."""
+    location_instr = generate_location_field_instructions(error_space)
+    return f"""{_VOTE_LEAD[mode]}
+
+{location_instr}
+
+Your response MUST be a valid JSON object with the following structure:
+{{
+  "hazard_vector": "Name or brief description of the identified hazard vector",
+  "location": [x1, x2, x3, ...],
+  "justification": "Detailed explanation of why you identified this hazard vector"
+}}
+
+CRITICAL: The "location" field must be a BINARY VECTOR (array of 0s and 1s), NOT a text description."""
+
+
+def create_protocol_message_without_consultation(error_space: Optional[Dict[str, Any]] = None) -> str:
+    """Phase 2 protocol message with the peer-consultation instructions removed (mode C2)."""
+    txt = create_phase2_protocol_message(error_space)
+    txt = "\n".join(l for l in txt.splitlines() if not _CONSULTATION_LINES.search(l))
+    txt = txt.replace("Now you will enter the peer consultation phase.",
+                      "Now you will provide your final hazard vector identification.")
+    return txt.replace("After consultation, your response", "Your response")
+
+
+def build_direct_vote_context(
+    mode: str,
+    agent_id: str,
+    system_prompt: str,
+    history: List[BaseMessage],
+    error_space: Optional[Dict[str, Any]],
+    phase1_reports: Optional[Dict[str, str]] = None,
+    phase1_contexts: Optional[Dict[str, List[BaseMessage]]] = None,
+    vectors_to_ignore: Optional[List[str]] = None,
+) -> List[BaseMessage]:
+    """Messages an agent sees before casting its vote in modes C0, C1 and C2.
+
+    ``history`` is the agent's Phase 2 view of the session (already filtered,
+    cleaned and truncated). In C1 an agent that produced a Phase 1 report votes
+    right after it, in the same context; an agent without one falls back to C0.
+    """
+    own_context = (phase1_contexts or {}).get(agent_id)
+    own_report = (phase1_reports or {}).get(agent_id)
+    if mode == "C1" and own_context and own_report:
+        msgs = list(own_context)
+        if system_prompt and not isinstance(msgs[0], SystemMessage):
+            msgs.insert(0, SystemMessage(content=system_prompt))
+        msgs.append(AIMessage(content=str(own_report)))
+    else:
+        msgs = [SystemMessage(content=system_prompt + PHASE2_OVERRIDE)] + list(history)
+        if mode == "C2":
+            msgs.append(HumanMessage(content=create_protocol_message_without_consultation(error_space)))
+            if phase1_reports:
+                msgs.append(SystemMessage(content=format_phase1_observations(phase1_reports)))
+        if vectors_to_ignore:
+            msgs.append(HumanMessage(content=format_vectors_to_ignore(vectors_to_ignore)))
+    msgs.append(HumanMessage(content=create_vote_request(mode, error_space)))
+    return msgs
+
+
+def _response_text(response) -> str:
+    """Text of an LLM response, joining Gemini-style content parts."""
+    content = getattr(response, "content", "")
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, dict):
+                parts.append(part["text"] if "text" in part else str(part))
+            else:
+                parts.append(str(part))
+        return "".join(parts)
+    return str(content or "")
+
+
+def _invoke_with_retry(llm, messages, label: str, max_retries: int, delay_503: int, delay_429: int, _p=print):
+    attempts = 0
+    while True:
+        try:
+            return llm.invoke(messages)
+        except Exception as exc:
+            estr = str(exc)
+            is_503 = 'UNAVAILABLE' in estr or '503' in estr
+            is_429 = 'RESOURCE_EXHAUSTED' in estr or '429' in estr
+            if (is_503 or is_429) and attempts < max_retries:
+                attempts += 1
+                wait = delay_503 if is_503 else delay_429
+                _p(f"WARNING  Transient LLM error for {label}; retrying in {wait}s ({attempts}/{max_retries})")
+                time.sleep(wait)
+            else:
+                raise
+
+
+def run_direct_vote(
+    mode: str,
+    agents_data: Dict[str, Any],
+    agent_order: List[str],
+    historical_messages: List[BaseMessage],
+    error_space: Optional[Dict[str, Any]],
+    phase1_reports: Optional[Dict[str, str]] = None,
+    phase1_contexts: Optional[Dict[str, List[BaseMessage]]] = None,
+    vectors_to_ignore: Optional[List[str]] = None,
+    model_name: str = "gemini-2.5-pro",
+    llm_provider: str = "gemini",
+    include_tool_calls: bool = False,
+    include_broadcast_messages: bool = False,
+    full_context: bool = False,
+    token_budget: int = 95_000,
+    api_call_delay: float = 0.0,
+    max_llm_retries: int = 5,
+    retry_delay_503: int = 30,
+    retry_delay_429: int = 60,
+    max_parallel_votes: int = 1,
+    token_tracker: Optional[Any] = None,
+    output_dir: Optional[Path] = None,
+    verbose: bool = True,
+    debug: bool = False,
+) -> Dict[str, Any]:
+    """Each agent casts its vote in a single LLM call (modes C0, C1, C2).
+
+    The vote is requested from a plain chat model built for the agent: no tools
+    are bound, so the agent cannot re-run its original actions. Returns a state
+    dict shaped like the one produced by the Phase 2 graph.
+    """
+    _p = print if verbose else (lambda *a, **kw: None)
+
+    def vote(agent_id: str):
+        agent_data = agents_data[agent_id]
+        history = filter_messages_for_agent(historical_messages, agent_id, include_broadcast_messages, full_context)
+        history = clean_historical_messages(history, include_tool_calls=include_tool_calls, current_agent_id=agent_id)
+        history = truncate_large_messages_if_needed(history, token_budget=token_budget)
+        messages = build_direct_vote_context(
+            mode, agent_id, agent_data.get("system_prompt", ""), history, error_space,
+            phase1_reports=phase1_reports, phase1_contexts=phase1_contexts,
+            vectors_to_ignore=vectors_to_ignore,
+        )
+        if debug and output_dir:
+            debug_dir = output_dir / "debug"
+            debug_dir.mkdir(parents=True, exist_ok=True)
+            save_agent_context_to_file(agent_id=agent_id, context_messages=messages,
+                                       total_messages=len(historical_messages),
+                                       output_dir=debug_dir, call_number=1)
+        if api_call_delay > 0:
+            time.sleep(api_call_delay)
+        llm = create_agent_llm(agent_data, model_name, llm_provider)
+        response = _invoke_with_retry(llm, messages, agent_data["name"], max_llm_retries,
+                                      retry_delay_503, retry_delay_429, _p)
+        return agent_id, response
+
+    if max_parallel_votes > 1 and len(agent_order) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(max_parallel_votes, len(agent_order))) as pool:
+            results = dict(pool.map(vote, agent_order))
+    else:
+        results = dict(vote(aid) for aid in agent_order)
+
+    responses, agent_states = [], {}
+    for agent_id in agent_order:
+        response = results[agent_id]
+        if token_tracker is not None and extract_tokens_from_response is not None:
+            token_tracker.add(extract_tokens_from_response(response))
+        content = _response_text(response)
+        vote_data = extract_vote_json(content) or {}
+        if not vote_data:
+            _p(f"  WARNING Could not extract vote JSON from {agents_data[agent_id]['name']}")
+        agent_states[f'{agent_id}_final_report'] = bool(vote_data)
+        agent_states[f'{agent_id}_hazard_vector'] = vote_data.get('hazard_vector', 'Error extracting vote' if not vote_data else 'Unknown')
+        agent_states[f'{agent_id}_hazard_location'] = vote_data.get('location', [])
+        agent_states[f'{agent_id}_justification'] = vote_data.get('justification', '')
+        _p(f"  {agents_data[agent_id]['name']} ({agent_id}) -> {vote_data.get('location')}")
+        add_message_metadata(response, from_node=agent_id, to_node="router")
+        responses.append(response)
+
+    return {'messages': list(historical_messages) + responses, 'agent_states': agent_states}
+
+
 class CommunicationToolFactory:
     """
     Factory for generating agent-to-agent communication tools dynamically.
@@ -1193,36 +1460,7 @@ def create_agent_nodes(
     Returns:
         Tuple of (call_llm, take_action, tools_dict)
     """
-    # Determine the LLM for this agent in Phase 2.
-    # Per-agent provider/model (from LangChainAgentAdapter) override the global
-    # defaults passed to execute_phase2_analysis. This allows mixed-model systems
-    # where each agent runs on a different LLM.
-    import os as _os
-    _agent_provider = agent_data.get("provider") or llm_provider
-    _agent_model    = agent_data.get("model") or model_name
-    _agent_api_key  = agent_data.get("api_key")
-
-    if _agent_api_key:
-        if _agent_provider == "deepseek":
-            _os.environ["DEEPSEEK_API_KEY"] = _agent_api_key
-        elif _agent_provider == "openai":
-            _os.environ["OPENAI_API_KEY"] = _agent_api_key
-        else:
-            _os.environ["GOOGLE_API_KEY"] = _agent_api_key
-
-    _use_local   = _agent_provider in ("local", "ollama")
-    _local_model = _agent_model if _use_local else None
-
-    if LLMFactory is not None:
-        llm = LLMFactory.create_chat_llm(
-            model_name=_agent_model,
-            use_local=_use_local,
-            local_model_name=_local_model,
-            provider=_agent_provider,
-            temperature=0,
-        )
-    else:
-        llm = ChatGoogleGenerativeAI(model=_agent_model, temperature=0)
+    llm = create_agent_llm(agent_data, model_name, llm_provider)
 
     # Bind original agent tools + POIROT communication tools so the agent
     # retains full capability while also being able to consult peers.
@@ -1283,22 +1521,7 @@ def create_agent_nodes(
         # the hazard analysis. Some agents (like Portfolio Managers) may have system prompts
         # that strictly forbid "risk assessment". We need to tell them that for this specific
         # phase (Post-Incident Review), they ARE required to do this.
-        phase2_override = """
-\n\n═══════════════════════════════════════════════════════════════════════════
-POIROT PROTOCOL OVERRIDE - READ CAREFULLY
-═══════════════════════════════════════════════════════════════════════════
-You are currently participating in a POST-INCIDENT REVIEW process (Phase 2).
-For the duration of this phase, the following rules SUPERSEDE your normal role constraints:
-
-1. You ARE AUTHORIZED and REQUIRED to perform "hazard analysis" and "risk assessment" of the previous session.
-2. You must evaluate the behavior of ALL agents, including yourself.
-3. You MUST provide a final output in JSON format defining the "hazard vector".
-
-Ignore any previous instructions that say "I do not assess risks" or "I only do X". 
-In this phase, your job is to be a CRITICAL EVALUATOR of the system's failure.
-═══════════════════════════════════════════════════════════════════════════
-"""
-        messages = [SystemMessage(content=agent_data['system_prompt'] + phase2_override)] + filtered
+        messages = [SystemMessage(content=agent_data['system_prompt'] + PHASE2_OVERRIDE)] + filtered
         
         # Add protocol, phase1, and ignore list ONLY on first call
         if not consulted and not force_final_vote:
@@ -1939,9 +2162,16 @@ def execute_phase2_analysis(
     agents_data_override: Optional[Dict[str, Any]] = None,
     verbose: bool = True,
     debug: bool = False,
+    mode: str = "C3",
+    phase1_contexts: Optional[Dict[str, List[BaseMessage]]] = None,
+    max_parallel_votes: int = 1,
 ) -> Dict[str, Any]:
     """
     Execute POIROT Phase 2: Peer Consultation Protocol.
+
+    With ``mode`` "C0", "C1" or "C2" the peer consultation is skipped and every
+    agent votes in a single call (see ``run_direct_vote``); "C3" runs the full
+    consultation graph. Votes, weighted voting and output files are the same.
     
     This function:
     1. Loads agents and their communication relationships from database
@@ -2058,282 +2288,296 @@ def execute_phase2_analysis(
     _p(f"  OK Loaded {len(historical_messages)} historical messages")
     _p()
     
-    # ═══════════════════════════════════════════════════════════════════════
-    # STEP 3: Create communication tools for each agent
-    # ═══════════════════════════════════════════════════════════════════════
-    _p(" STEP 3: Creating communication tools...")
+    mode = resolve_mode(mode)
+    if mode != "C3":
+        _p(f" STEP 3: Mode {mode} - each agent votes once, no peer consultation...")
+        final_state = run_direct_vote(
+            mode, agents_data, agent_order, historical_messages, error_space,
+            phase1_reports=phase1_reports, phase1_contexts=phase1_contexts,
+            vectors_to_ignore=vectors_to_ignore, model_name=model_name, llm_provider=llm_provider,
+            include_tool_calls=include_tool_calls, include_broadcast_messages=include_broadcast_messages,
+            full_context=full_context, token_budget=token_budget, api_call_delay=api_call_delay,
+            max_llm_retries=max_llm_retries, retry_delay_503=retry_delay_503,
+            retry_delay_429=retry_delay_429, max_parallel_votes=max_parallel_votes,
+            token_tracker=token_tracker, output_dir=output_dir, verbose=verbose, debug=debug,
+        )
+    else:
+        # ═══════════════════════════════════════════════════════════════════════
+        # STEP 3: Create communication tools for each agent
+        # ═══════════════════════════════════════════════════════════════════════
+        _p(" STEP 3: Creating communication tools...")
     
-    tool_factory = CommunicationToolFactory()
-    agent_tools = {}  # {agent_id: [tool1, tool2, ...]}
+        tool_factory = CommunicationToolFactory()
+        agent_tools = {}  # {agent_id: [tool1, tool2, ...]}
     
-    for agent_id, agent_data in agents_data.items():
-        tools = []
+        for agent_id, agent_data in agents_data.items():
+            tools = []
         
-        # PHASE 2 ENHANCEMENT: If can_communicate_with is empty, allow communication with ALL other agents
-        # This is essential for the peer consultation protocol where all agents need to discuss
-        targets = agent_data['can_communicate_with']
-        if not targets:
-            # Allow communication with all other agents (except self)
-            targets = [aid for aid in agents_data.keys() if aid != agent_id]
-            _p(f"  i  {agent_data['name']}: No communication targets defined, enabling ALL peers")
+            # PHASE 2 ENHANCEMENT: If can_communicate_with is empty, allow communication with ALL other agents
+            # This is essential for the peer consultation protocol where all agents need to discuss
+            targets = agent_data['can_communicate_with']
+            if not targets:
+                # Allow communication with all other agents (except self)
+                targets = [aid for aid in agents_data.keys() if aid != agent_id]
+                _p(f"  i  {agent_data['name']}: No communication targets defined, enabling ALL peers")
         
-        for target_id in targets:
-            if target_id in agents_data and target_id != agent_id:
-                tool = tool_factory.create_tool(target_id, agents_data[target_id]['name'], agent_id)
-                tools.append(tool)
+            for target_id in targets:
+                if target_id in agents_data and target_id != agent_id:
+                    tool = tool_factory.create_tool(target_id, agents_data[target_id]['name'], agent_id)
+                    tools.append(tool)
         
-        agent_tools[agent_id] = tools
+            agent_tools[agent_id] = tools
         
-        tool_names = [t.name for t in tools]
-        _p(f"  OK {agent_data['name']}: {len(tools)} tools ({', '.join(tool_names) if tool_names else 'none'})")
+            tool_names = [t.name for t in tools]
+            _p(f"  OK {agent_data['name']}: {len(tools)} tools ({', '.join(tool_names) if tool_names else 'none'})")
     
-    _p()
+        _p()
     
-    # ═══════════════════════════════════════════════════════════════════════
-    # STEP 4: Create agent nodes for LangGraph
-    # ═══════════════════════════════════════════════════════════════════════
-    _p("  STEP 4: Creating LangGraph nodes...")
+        # ═══════════════════════════════════════════════════════════════════════
+        # STEP 4: Create agent nodes for LangGraph
+        # ═══════════════════════════════════════════════════════════════════════
+        _p("  STEP 4: Creating LangGraph nodes...")
     
-    agent_nodes = {}  # {agent_id: {'call_llm': fn, 'take_action': fn, 'tools_dict': dict}}
+        agent_nodes = {}  # {agent_id: {'call_llm': fn, 'take_action': fn, 'tools_dict': dict}}
     
-    for agent_id, agent_data in agents_data.items():
-        call_llm, take_action, tools_dict = create_agent_nodes(
-            agent_id=agent_id,
-            agent_data=agent_data,
-            communication_tools=agent_tools[agent_id],
+        for agent_id, agent_data in agents_data.items():
+            call_llm, take_action, tools_dict = create_agent_nodes(
+                agent_id=agent_id,
+                agent_data=agent_data,
+                communication_tools=agent_tools[agent_id],
+                tool_factory=tool_factory,
+                phase1_reports=phase1_reports,
+                vectors_to_ignore=vectors_to_ignore,
+                error_space=error_space,
+                historical_messages=historical_messages,
+                model_name=model_name,
+                output_dir=output_dir,
+                include_tool_calls=include_tool_calls,
+                include_broadcast_messages=include_broadcast_messages,
+                full_context=full_context,
+                api_call_delay=api_call_delay,
+                token_tracker=token_tracker,
+                llm_provider=llm_provider,
+                max_agent_messages=max_agent_messages,
+                max_llm_retries=max_llm_retries,
+                retry_delay_503=retry_delay_503,
+                retry_delay_429=retry_delay_429,
+                token_budget=token_budget,
+                debug=debug,
+            )
+
+            agent_nodes[agent_id] = {
+                'call_llm': call_llm,
+                'take_action': take_action,
+                'tools_dict': tools_dict
+            }
+        
+            _p(f"  OK Created nodes for {agent_data['name']}")
+    
+        _p()
+    
+        # ═══════════════════════════════════════════════════════════════════════
+        # STEP 5: Create POIROT server and routing functions
+        # ═══════════════════════════════════════════════════════════════════════
+        _p(" STEP 5: Creating POIROT server and routing...")
+    
+        poirot_server = create_poirot_server_node(
+            agents_data=agents_data,
             tool_factory=tool_factory,
-            phase1_reports=phase1_reports,
-            vectors_to_ignore=vectors_to_ignore,
             error_space=error_space,
-            historical_messages=historical_messages,
             model_name=model_name,
-            output_dir=output_dir,
-            include_tool_calls=include_tool_calls,
-            include_broadcast_messages=include_broadcast_messages,
-            full_context=full_context,
             api_call_delay=api_call_delay,
+            use_local_llm=use_local_llm,
+            local_model_name=local_model_name,
             token_tracker=token_tracker,
             llm_provider=llm_provider,
             max_agent_messages=max_agent_messages,
-            max_llm_retries=max_llm_retries,
-            retry_delay_503=retry_delay_503,
-            retry_delay_429=retry_delay_429,
-            token_budget=token_budget,
-            debug=debug,
         )
 
-        agent_nodes[agent_id] = {
-            'call_llm': call_llm,
-            'take_action': take_action,
-            'tools_dict': tools_dict
-        }
-        
-        _p(f"  OK Created nodes for {agent_data['name']}")
-    
-    _p()
-    
-    # ═══════════════════════════════════════════════════════════════════════
-    # STEP 5: Create POIROT server and routing functions
-    # ═══════════════════════════════════════════════════════════════════════
-    _p(" STEP 5: Creating POIROT server and routing...")
-    
-    poirot_server = create_poirot_server_node(
-        agents_data=agents_data,
-        tool_factory=tool_factory,
-        error_space=error_space,
-        model_name=model_name,
-        api_call_delay=api_call_delay,
-        use_local_llm=use_local_llm,
-        local_model_name=local_model_name,
-        token_tracker=token_tracker,
-        llm_provider=llm_provider,
-        max_agent_messages=max_agent_messages,
-    )
-
-    # Create routing functions for each agent
-    agent_routers = {}
-    for agent_id in agent_order:
-        route_llm, route_tools = create_routing_functions(agent_id, tool_factory, max_agent_messages=max_agent_messages)
-        agent_routers[agent_id] = {
-            'route_after_llm': route_llm,
-            'route_after_tools': route_tools
-        }
-    
-    _p(f"  OK POIROT server created")
-    _p(f"  OK Routing functions created for {len(agent_routers)} agents")
-    _p()
-    
-    # ═══════════════════════════════════════════════════════════════════════
-    # STEP 6: Build LangGraph StateGraph
-    # ═══════════════════════════════════════════════════════════════════════
-    _p("  STEP 6: Building LangGraph StateGraph...")
-    
-    graph = StateGraph(Phase2State)
-    
-    # Add agent nodes
-    for agent_id, nodes in agent_nodes.items():
-        graph.add_node(f"llm_{agent_id}", nodes['call_llm'])
-        graph.add_node(f"tools_{agent_id}", nodes['take_action'])
-    
-    # Add POIROT server node
-    graph.add_node("poirot_server", poirot_server)
-    
-    # Set entry point (first agent in order)
-    graph.set_entry_point(f"llm_{agent_order[0]}")
-    
-    # Add edges for each agent
-    for i, agent_id in enumerate(agent_order):
-        router = agent_routers[agent_id]
-        
-        # Next agent or END
-        if i < len(agent_order) - 1:
-            next_node = f"llm_{agent_order[i+1]}"
-        else:
-            next_node = END
-        
-        # LLM routing
-        graph.add_conditional_edges(
-            f"llm_{agent_id}",
-            router['route_after_llm'],
-            {
-                "tools": f"tools_{agent_id}",
-                "next_agent": next_node,
-                "continue": f"llm_{agent_id}"
+        # Create routing functions for each agent
+        agent_routers = {}
+        for agent_id in agent_order:
+            route_llm, route_tools = create_routing_functions(agent_id, tool_factory, max_agent_messages=max_agent_messages)
+            agent_routers[agent_id] = {
+                'route_after_llm': route_llm,
+                'route_after_tools': route_tools
             }
-        )
+    
+        _p(f"  OK POIROT server created")
+        _p(f"  OK Routing functions created for {len(agent_routers)} agents")
+        _p()
+    
+        # ═══════════════════════════════════════════════════════════════════════
+        # STEP 6: Build LangGraph StateGraph
+        # ═══════════════════════════════════════════════════════════════════════
+        _p("  STEP 6: Building LangGraph StateGraph...")
+    
+        graph = StateGraph(Phase2State)
+    
+        # Add agent nodes
+        for agent_id, nodes in agent_nodes.items():
+            graph.add_node(f"llm_{agent_id}", nodes['call_llm'])
+            graph.add_node(f"tools_{agent_id}", nodes['take_action'])
+    
+        # Add POIROT server node
+        graph.add_node("poirot_server", poirot_server)
+    
+        # Set entry point (first agent in order)
+        graph.set_entry_point(f"llm_{agent_order[0]}")
+    
+        # Add edges for each agent
+        for i, agent_id in enumerate(agent_order):
+            router = agent_routers[agent_id]
         
-        # Tool routing
-        graph.add_conditional_edges(
-            f"tools_{agent_id}",
-            router['route_after_tools'],
-            {
-                "poirot_server": "poirot_server",
-                "next_agent": next_node,
-                "continue": f"llm_{agent_id}"
-            }
-        )
-    
-    # POIROT server routing (back to agents)
-    def route_from_server(state: Phase2State) -> str:
-        """Route from POIROT server back to the agent who made the consultation."""
-        # Find which agent has messages in flight by checking metadata
-        # The last message from server should have to_node = sender_agent_id
-        last_msg = state['messages'][-1] if state['messages'] else None
-        
-        if last_msg and hasattr(last_msg, 'additional_kwargs'):
-            metadata = last_msg.additional_kwargs.get('metadata', {})
-            to_node = metadata.get('to_node', '')
-            
-            # to_node now contains the actual sender agent_id
-            if to_node and to_node in agent_order:
-                return f"llm_{to_node}"
-        
-        # Fallback: return to first agent
-        return f"llm_{agent_order[0]}"
-    
-    # Build routing map for POIROT server
-    server_routing = {f"llm_{agent_id}": f"llm_{agent_id}" for agent_id in agent_order}
-    
-    graph.add_conditional_edges(
-        "poirot_server",
-        route_from_server,
-        server_routing
-    )
-    
-    # Compile graph
-    compiled_graph = graph.compile()
-    
-    _p(f"  OK StateGraph built successfully")
-    _p(f"     - {len(agent_order)} agent nodes")
-    _p(f"     - 1 POIROT server node")
-    _p(f"     - Entry point: {agent_order[0]}")
-    _p()
-    
-    # ═══════════════════════════════════════════════════════════════════════
-    # STEP 7: Initialize state and execute graph
-    # ═══════════════════════════════════════════════════════════════════════
-    _p(" STEP 7: Executing Phase 2 consultation process...")
-    _p(f"{'='*80}\n")
-    
-    # Initialize state
-    initial_state = {
-        'messages': historical_messages,
-        'session_id': session_id,
-        'agent_states': {}
-    }
-    
-    # Add tracking flags for each agent
-    for agent_id in agent_order:
-        initial_state['agent_states'][f'{agent_id}_consulted'] = False
-        initial_state['agent_states'][f'{agent_id}_final_report'] = False
-        initial_state['agent_states'][f'{agent_id}_call_count'] = 0
-        initial_state['agent_states'][f'{agent_id}_hazard_vector'] = ""
-        initial_state['agent_states'][f'{agent_id}_hazard_location'] = []
-        initial_state['agent_states'][f'{agent_id}_justification'] = ""
-    
-    # Execute graph with retry logic for rate limiting
-    final_state = initial_state
-    max_rate_limit_retries = 5
-    rate_limit_wait_seconds = 60  # 1 minute wait on rate limit
-    
-    rate_limit_retry_count = 0
-    execution_complete = False
-    
-    while not execution_complete and rate_limit_retry_count < max_rate_limit_retries:
-        try:
-            # Use stream to capture state updates in case of interruption/recursion limit
-            for output in compiled_graph.stream(initial_state, {"recursion_limit": recursion_limit}):
-                for node_name, state_update in output.items():
-                    # Update our local tracking of the state
-                    # Note: This is a simple merge. For complex state, deep merge might be needed.
-                    if isinstance(state_update, dict):
-                        if 'messages' in state_update:
-                            # Append messages
-                            final_state['messages'].extend(state_update['messages'])
-                        
-                        if 'agent_states' in state_update:
-                            final_state['agent_states'].update(state_update['agent_states'])
-                            
-                        if 'next_agent' in state_update:
-                            final_state['next_agent'] = state_update['next_agent']
-                            
-                        if 'loop_count' in state_update:
-                            final_state['loop_count'] = state_update['loop_count']
-            
-            execution_complete = True  # Successfully completed
-            
-        except Exception as e:
-            error_str = str(e)
-            # Check if it's a rate limit error (429 RESOURCE_EXHAUSTED)
-            _is_rate_limit = 'RESOURCE_EXHAUSTED' in error_str or '429' in error_str
-            # Check if it's a transient availability error (503 UNAVAILABLE)
-            # Note: these should normally be retried inside call_llm; this outer
-            # catch is a safety net for errors that bubble all the way up.
-            _is_unavailable = 'UNAVAILABLE' in error_str or '503' in error_str
-
-            if _is_rate_limit or _is_unavailable:
-                rate_limit_retry_count += 1
-                if rate_limit_retry_count < max_rate_limit_retries:
-                    _code   = '429 RESOURCE_EXHAUSTED' if _is_rate_limit else '503 UNAVAILABLE'
-                    _wait   = rate_limit_wait_seconds if _is_rate_limit else 30
-                    _p(f"\nWARNING  Transient API error reached graph level ({_code})")
-                    _p(f"... Waiting {_wait}s before retry "
-                          f"({rate_limit_retry_count}/{max_rate_limit_retries})...")
-                    time.sleep(_wait)
-                    _p("Retry Resuming graph execution...")
-                else:
-                    _p(f"\nERROR Max retries ({max_rate_limit_retries}) exceeded. Proceeding with partial results...")
-                    execution_complete = True
+            # Next agent or END
+            if i < len(agent_order) - 1:
+                next_node = f"llm_{agent_order[i+1]}"
             else:
-                # Other error (e.g., recursion limit)
-                _p(f"\nWARNING  Graph execution interrupted (likely recursion limit): {e}")
-                _p("WARNING  Proceeding with partial results...")
-                execution_complete = True  # Exit loop
-                # We continue with whatever final_state we have accumulated
+                next_node = END
+        
+            # LLM routing
+            graph.add_conditional_edges(
+                f"llm_{agent_id}",
+                router['route_after_llm'],
+                {
+                    "tools": f"tools_{agent_id}",
+                    "next_agent": next_node,
+                    "continue": f"llm_{agent_id}"
+                }
+            )
+        
+            # Tool routing
+            graph.add_conditional_edges(
+                f"tools_{agent_id}",
+                router['route_after_tools'],
+                {
+                    "poirot_server": "poirot_server",
+                    "next_agent": next_node,
+                    "continue": f"llm_{agent_id}"
+                }
+            )
     
-    _p(f"\n{'='*80}")
-    _p("OK Phase 2 consultation completed successfully")
-    _p(f"{'='*80}\n")
+        # POIROT server routing (back to agents)
+        def route_from_server(state: Phase2State) -> str:
+            """Route from POIROT server back to the agent who made the consultation."""
+            # Find which agent has messages in flight by checking metadata
+            # The last message from server should have to_node = sender_agent_id
+            last_msg = state['messages'][-1] if state['messages'] else None
+        
+            if last_msg and hasattr(last_msg, 'additional_kwargs'):
+                metadata = last_msg.additional_kwargs.get('metadata', {})
+                to_node = metadata.get('to_node', '')
+            
+                # to_node now contains the actual sender agent_id
+                if to_node and to_node in agent_order:
+                    return f"llm_{to_node}"
+        
+            # Fallback: return to first agent
+            return f"llm_{agent_order[0]}"
+    
+        # Build routing map for POIROT server
+        server_routing = {f"llm_{agent_id}": f"llm_{agent_id}" for agent_id in agent_order}
+    
+        graph.add_conditional_edges(
+            "poirot_server",
+            route_from_server,
+            server_routing
+        )
+    
+        # Compile graph
+        compiled_graph = graph.compile()
+    
+        _p(f"  OK StateGraph built successfully")
+        _p(f"     - {len(agent_order)} agent nodes")
+        _p(f"     - 1 POIROT server node")
+        _p(f"     - Entry point: {agent_order[0]}")
+        _p()
+    
+        # ═══════════════════════════════════════════════════════════════════════
+        # STEP 7: Initialize state and execute graph
+        # ═══════════════════════════════════════════════════════════════════════
+        _p(" STEP 7: Executing Phase 2 consultation process...")
+        _p(f"{'='*80}\n")
+    
+        # Initialize state
+        initial_state = {
+            'messages': historical_messages,
+            'session_id': session_id,
+            'agent_states': {}
+        }
+    
+        # Add tracking flags for each agent
+        for agent_id in agent_order:
+            initial_state['agent_states'][f'{agent_id}_consulted'] = False
+            initial_state['agent_states'][f'{agent_id}_final_report'] = False
+            initial_state['agent_states'][f'{agent_id}_call_count'] = 0
+            initial_state['agent_states'][f'{agent_id}_hazard_vector'] = ""
+            initial_state['agent_states'][f'{agent_id}_hazard_location'] = []
+            initial_state['agent_states'][f'{agent_id}_justification'] = ""
+    
+        # Execute graph with retry logic for rate limiting
+        final_state = initial_state
+        max_rate_limit_retries = 5
+        rate_limit_wait_seconds = 60  # 1 minute wait on rate limit
+    
+        rate_limit_retry_count = 0
+        execution_complete = False
+    
+        while not execution_complete and rate_limit_retry_count < max_rate_limit_retries:
+            try:
+                # Use stream to capture state updates in case of interruption/recursion limit
+                for output in compiled_graph.stream(initial_state, {"recursion_limit": recursion_limit}):
+                    for node_name, state_update in output.items():
+                        # Update our local tracking of the state
+                        # Note: This is a simple merge. For complex state, deep merge might be needed.
+                        if isinstance(state_update, dict):
+                            if 'messages' in state_update:
+                                # Append messages
+                                final_state['messages'].extend(state_update['messages'])
+                        
+                            if 'agent_states' in state_update:
+                                final_state['agent_states'].update(state_update['agent_states'])
+                            
+                            if 'next_agent' in state_update:
+                                final_state['next_agent'] = state_update['next_agent']
+                            
+                            if 'loop_count' in state_update:
+                                final_state['loop_count'] = state_update['loop_count']
+            
+                execution_complete = True  # Successfully completed
+            
+            except Exception as e:
+                error_str = str(e)
+                # Check if it's a rate limit error (429 RESOURCE_EXHAUSTED)
+                _is_rate_limit = 'RESOURCE_EXHAUSTED' in error_str or '429' in error_str
+                # Check if it's a transient availability error (503 UNAVAILABLE)
+                # Note: these should normally be retried inside call_llm; this outer
+                # catch is a safety net for errors that bubble all the way up.
+                _is_unavailable = 'UNAVAILABLE' in error_str or '503' in error_str
+
+                if _is_rate_limit or _is_unavailable:
+                    rate_limit_retry_count += 1
+                    if rate_limit_retry_count < max_rate_limit_retries:
+                        _code   = '429 RESOURCE_EXHAUSTED' if _is_rate_limit else '503 UNAVAILABLE'
+                        _wait   = rate_limit_wait_seconds if _is_rate_limit else 30
+                        _p(f"\nWARNING  Transient API error reached graph level ({_code})")
+                        _p(f"... Waiting {_wait}s before retry "
+                              f"({rate_limit_retry_count}/{max_rate_limit_retries})...")
+                        time.sleep(_wait)
+                        _p("Retry Resuming graph execution...")
+                    else:
+                        _p(f"\nERROR Max retries ({max_rate_limit_retries}) exceeded. Proceeding with partial results...")
+                        execution_complete = True
+                else:
+                    # Other error (e.g., recursion limit)
+                    _p(f"\nWARNING  Graph execution interrupted (likely recursion limit): {e}")
+                    _p("WARNING  Proceeding with partial results...")
+                    execution_complete = True  # Exit loop
+                    # We continue with whatever final_state we have accumulated
+    
+        _p(f"\n{'='*80}")
+        _p("OK Phase 2 consultation completed successfully")
+        _p(f"{'='*80}\n")
     
     # ═══════════════════════════════════════════════════════════════════════
     # STEP 8: Extract votes and save outputs

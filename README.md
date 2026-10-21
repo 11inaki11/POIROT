@@ -33,6 +33,29 @@ The result is an explainable, auditable forensic report — not a black-box pred
 
 ---
 
+## Protocol modes
+
+The protocol can stop before peer consultation. Every mode ends with the same JSON vote from each agent and the same weighted consensus; they differ only in what an agent has seen when it votes. Choose one with `mode=`:
+
+| `mode` | Phases that run | What each agent sees when it votes | LLM calls per agent |
+| --- | --- | --- | --- |
+| `"C0"` | Error space → vote | The session log | 1 |
+| `"C1"` **(default)** | Error space → self-assessment → vote | Its own self-assessment, in the same context it was written | 2 |
+| `"C2"` | Error space → self-assessment → vote | The session log and the self-assessments of **all** agents | 2 |
+| `"C3"` | Error space → self-assessment → peer consultation → vote | Everything above, plus answers from the agents it interrogated | 2 to `max_agent_messages + 1` |
+
+`"C1"` is the default since version 0.2.0: each agent votes right after its own self-assessment, without peer consultation. It is the recommended setting, and it is much cheaper and faster than the full protocol. Use `mode="C3"` to run the full protocol (the behaviour of version 0.1.x).
+
+```python
+results = run_poirot_from_agents(..., mode="C1")   # default
+results = run_poirot_from_agents(..., mode="C3")   # full protocol with peer consultation
+results["mode"]                                    # mode that produced the verdict
+```
+
+Aliases are accepted: `"vote_only"` (C0), `"self_assessment"` (C1), `"shared_reports"` (C2), `"full"` (C3). In modes C0–C2 the vote is requested from a plain chat model with no tools bound, so agents never re-run their original tools while voting; `max_parallel_votes=N` lets up to N agents vote concurrently.
+
+---
+
 ## Benchmark results
 
 Evaluated on the **Who&When benchmark** — 122 heterogeneous multi-agent configurations each with a single injected fault spanning medical, financial, and software domains.
@@ -48,7 +71,8 @@ POIROT consistently outperforms a single-LLM baseline across all four tested mod
 ## Installation
 
 ```bash
-pip install poirot-framework
+pip install poirot-framework            # latest release from PyPI
+pip install "poirot-framework>=0.2.0"   # protocol modes (C1 default)
 ```
 
 Requires Python 3.10+.
@@ -172,6 +196,8 @@ results["details"]["phase2_voting"]
 | `verbose` | `True` | Print protocol progress to terminal |
 | `debug` | `False` | Save intermediate LLM context files to `debug/` subfolder |
 | `ignore_list` | `None` | Component names to exclude from analysis |
+| `mode` | `"C1"` | Protocol mode: `"C0"`, `"C1"`, `"C2"` or `"C3"` (see [Protocol modes](#protocol-modes)) |
+| `max_parallel_votes` | `1` | Agents voting concurrently in modes C0–C2 |
 
 Full parameter reference: [API Reference](docs/wiki/api-reference.md)
 

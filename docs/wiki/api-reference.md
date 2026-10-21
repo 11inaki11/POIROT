@@ -72,11 +72,27 @@ Returns a `dict` with the full analysis results including agent votes and the fi
 
 ---
 
+### Optional parameters — protocol mode
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `mode` | `str` | `"C1"` | How far the protocol runs before the vote. Aliases: `"vote_only"`, `"self_assessment"`, `"shared_reports"`, `"full"`. |
+| `max_parallel_votes` | `int` | `1` | In modes C0–C2, number of agents that vote concurrently (1 = sequential). |
+
+| `mode` | Phases that run | What each agent sees when it votes | LLM calls per agent |
+| --- | --- | --- | --- |
+| `"C0"` | Error space → vote | The session log | 1 |
+| `"C1"` **(default)** | Error space → self-assessment → vote | Its own self-assessment, in the same context it was written | 2 |
+| `"C2"` | Error space → self-assessment → vote | The session log and the self-assessments of **all** agents | 2 |
+| `"C3"` | Error space → self-assessment → peer consultation → vote | Everything above, plus answers from the agents it interrogated | 2 to `max_agent_messages + 1` |
+
+In modes C0–C2 each agent votes in a single call to a plain chat model built for it (its per-agent provider and model are respected); no tools are bound to that call. Mode C0 skips the self-assessment phase entirely. In C1 an agent that did not take part in the session, and therefore wrote no self-assessment, votes from the session log as in C0.
+
 ### Optional parameters — Phase 2
 
 | Parameter | Type | Default | Description |
 | --- | --- | --- | --- |
-| `max_agent_messages` | `int` | `8` | Maximum number of LLM calls per agent during Phase 2 peer consultation. |
+| `max_agent_messages` | `int` | `8` | Maximum number of LLM calls per agent during Phase 2 peer consultation (mode C3 only). |
 
 ---
 
@@ -157,7 +173,9 @@ results = run_poirot_from_agents(
 | `full_context` | `bool` | `False` | Each agent sees all session messages (see context overflow warning above) |
 | `ollama_num_ctx` | `int` | `131072` | Context window size for Ollama models |
 | `token_budget` | `int` | `95000` | Max tokens in Phase 2 context windows |
-| `max_agent_messages` | `int` | `8` | Max LLM calls per agent in Phase 2 |
+| `mode` | `str` | `"C1"` | Protocol mode: `"C0"`, `"C1"`, `"C2"` or `"C3"` (see above) |
+| `max_parallel_votes` | `int` | `1` | Agents voting concurrently in modes C0–C2 |
+| `max_agent_messages` | `int` | `8` | Max LLM calls per agent in Phase 2 (mode C3) |
 | `api_call_delay` | `float` | `0.0` | Seconds between LLM calls |
 | `max_llm_retries` | `int` | `5` | Max retries on transient errors |
 | `retry_delay_503` | `int` | `30` | Wait seconds after a 503 error |
@@ -174,6 +192,7 @@ results = run_poirot_from_agents(...)
 
 # ── Top-level keys ────────────────────────────────────────────────────────────
 results["system_name"]       # str  — name you passed in
+results["mode"]              # str  — protocol mode used ("C0".."C3")
 results["error_space"]       # list — error dimensions from Phase 0
 results["consensus"]         # dict — aggregated verdict
 results["agent_reports"]     # dict — per-agent final votes

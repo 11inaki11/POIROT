@@ -35,10 +35,15 @@ Example (LangChain agents)::
         api_key="YOUR_KEY",
     )
 
-Version: 1.1.0
+Protocol modes (``mode=``)::
+
+    "C0"  vote directly from the session log            (Phase 0 -> vote)
+    "C1"  vote after the agent's own self-assessment    (Phase 0 -> Phase 1 -> vote)   default
+    "C2"  vote after reading every agent's report       (Phase 0 -> Phase 1 -> vote)
+    "C3"  full protocol with peer interrogation         (Phase 0 -> Phase 1 -> Phase 2)
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 import os
 from pathlib import Path
@@ -47,6 +52,7 @@ from typing import Any, Dict, List, Optional
 from .poirot_agent import POIROTAgent
 from .poirot_pipeline import POIROTPipeline
 from .adapters import LangChainAgentAdapter
+from .phase2_protocol import DEFAULT_MODE, PROTOCOL_MODES, resolve_mode
 
 __all__ = [
     "run_poirot",
@@ -54,8 +60,9 @@ __all__ = [
     "LangChainAgentAdapter",
     "POIROTAgent",
     "POIROTPipeline",
+    "PROTOCOL_MODES",
+    "DEFAULT_MODE",
 ]
-__version__ = "1.1.0"
 
 # ---------------------------------------------------------------------------
 # Provider → default model mapping
@@ -91,6 +98,9 @@ def run_poirot(
     # ── Optional — context window ──────────────────────────────────────────
     ollama_num_ctx: int = 131_072,
     token_budget: int = 95_000,
+    # ── Optional — protocol ────────────────────────────────────────────────
+    mode: str = DEFAULT_MODE,
+    max_parallel_votes: int = 1,
     # ── Optional — phase 2 ─────────────────────────────────────────────────
     max_agent_messages: int = 8,
     # ── Optional — retries / delay ─────────────────────────────────────────
@@ -121,7 +131,15 @@ def run_poirot(
             Warning: enabling this can cause context overflow in long sessions.
         ollama_num_ctx: Context window size for Ollama models (tokens).
         token_budget: Maximum tokens for agent context windows in Phase 2.
-        max_agent_messages: Maximum LLM calls per agent in Phase 2.
+        mode: Protocol mode. ``"C1"`` (default) asks each agent for its vote
+            right after its own Phase 1 self-assessment. ``"C0"`` votes from the
+            session log without Phase 1, ``"C2"`` shares every Phase 1 report
+            before the vote, and ``"C3"`` runs the full protocol with peer
+            interrogation. Aliases: ``"vote_only"``, ``"self_assessment"``,
+            ``"shared_reports"``, ``"full"``.
+        max_parallel_votes: In modes C0-C2, number of agents that vote
+            concurrently (1 = sequential).
+        max_agent_messages: Maximum LLM calls per agent in Phase 2 (mode C3).
         api_call_delay: Seconds to wait between LLM calls (rate limiting).
         max_llm_retries: Maximum retry attempts on transient API errors.
         retry_delay_503: Seconds to wait after a 503 UNAVAILABLE error.
@@ -139,6 +157,7 @@ def run_poirot(
             f"Unknown provider '{provider}'. "
             f"Valid options: {sorted(valid_providers)}"
         )
+    mode = resolve_mode(mode)
 
     # Set API key in the correct environment variable
     if api_key:
@@ -174,6 +193,8 @@ def run_poirot(
         retry_delay_503=retry_delay_503,
         retry_delay_429=retry_delay_429,
         verbose=verbose,
+        mode=mode,
+        max_parallel_votes=max_parallel_votes,
     )
 
     return pipeline.run_full_analysis(specific_session_id=session_id)
@@ -200,6 +221,9 @@ def run_poirot_from_agents(
     # ── Optional — context window ──────────────────────────────────────────
     ollama_num_ctx: int = 131_072,
     token_budget: int = 95_000,
+    # ── Optional — protocol ────────────────────────────────────────────────
+    mode: str = DEFAULT_MODE,
+    max_parallel_votes: int = 1,
     # ── Optional — phase 2 ─────────────────────────────────────────────────
     max_agent_messages: int = 8,
     # ── Optional — retries / delay ─────────────────────────────────────────
@@ -233,7 +257,15 @@ def run_poirot_from_agents(
             in the session. Warning: can cause context overflow in long sessions.
         ollama_num_ctx: Context window size for Ollama models (tokens).
         token_budget: Maximum tokens for agent context windows in Phase 2.
-        max_agent_messages: Maximum LLM calls per agent in Phase 2.
+        mode: Protocol mode. ``"C1"`` (default) asks each agent for its vote
+            right after its own Phase 1 self-assessment. ``"C0"`` votes from the
+            session log without Phase 1, ``"C2"`` shares every Phase 1 report
+            before the vote, and ``"C3"`` runs the full protocol with peer
+            interrogation. Aliases: ``"vote_only"``, ``"self_assessment"``,
+            ``"shared_reports"``, ``"full"``.
+        max_parallel_votes: In modes C0-C2, number of agents that vote
+            concurrently (1 = sequential).
+        max_agent_messages: Maximum LLM calls per agent in Phase 2 (mode C3).
         api_call_delay: Seconds to wait between LLM calls (rate limiting).
         max_llm_retries: Maximum retry attempts on transient API errors.
         retry_delay_503: Seconds to wait after a 503 UNAVAILABLE error.
@@ -244,6 +276,8 @@ def run_poirot_from_agents(
 
         ``system_name``
             Name of the analyzed system.
+        ``mode``
+            Protocol mode used (``"C0"`` .. ``"C3"``).
         ``error_space``
             List of error dimensions defined in Phase 0 — each with ``id``,
             ``name``, ``type``, and ``description``.
@@ -271,6 +305,7 @@ def run_poirot_from_agents(
             f"Unknown provider '{provider}'. "
             f"Valid options: {sorted(valid_providers)}"
         )
+    mode = resolve_mode(mode)
 
     # Set API key in the correct environment variable
     if api_key:
@@ -315,8 +350,9 @@ def run_poirot_from_agents(
     if "error" in error_space:
         raise RuntimeError(f"Phase 0 failed: {error_space['error']}")
 
-    # Phase 1: Individual analysis (no agent factory — agentless mode)
-    phase1_result = execute_phase1_analysis(
+    # Phase 1: Individual analysis (no agent factory — agentless mode).
+    # Mode C0 votes straight from the session log and skips it.
+    phase1_result = {"reports": {}, "contexts": {}} if mode == "C0" else execute_phase1_analysis(
         agents=agents_configs,
         processed_messages=processed_messages,
         agent_factory=None,
@@ -344,8 +380,10 @@ def run_poirot_from_agents(
         if isinstance(phase1_result, dict)
         else phase1_result
     )
+    phase1_contexts = phase1_result.get("contexts") if isinstance(phase1_result, dict) else None
 
-    # Phase 2: Peer consultation (bypass DB reads via override params)
+    # Phase 2: the vote — peer consultation first only in mode C3
+    # (bypass DB reads via override params)
     phase2_result = execute_phase2_analysis(
         session_id="langchain_session",
         db_path=None,
@@ -370,6 +408,9 @@ def run_poirot_from_agents(
         agents_data_override=agents_configs,
         verbose=verbose,
         debug=debug,
+        mode=mode,
+        phase1_contexts=phase1_contexts,
+        max_parallel_votes=max_parallel_votes,
     )
 
     # ── Build user-friendly result ───────────────────────────────────────────
@@ -382,6 +423,8 @@ def run_poirot_from_agents(
 
     return {
         "system_name": system_name,
+        # Protocol mode that produced this verdict
+        "mode": mode,
         # Error dimensions defined in Phase 0
         "error_space": error_space.get("error_regions", []),
         # Aggregated verdict
@@ -394,7 +437,7 @@ def run_poirot_from_agents(
             # Empty list when no tie; full list of tied names when tied
             "tied_components": tied_names,
         },
-        # Per-agent final votes from Phase 2
+        # Per-agent final votes
         "agent_reports": {
             agent_id: {
                 "name": data.get("agent_name", agent_id),

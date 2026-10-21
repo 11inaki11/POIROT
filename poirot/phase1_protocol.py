@@ -278,6 +278,7 @@ def execute_phase1_analysis(
     _p("="*80 + "\n")
     
     phase1_reports = {}
+    phase1_contexts = {}
     phase1_metadata = {}
     skipped_agents = []
     
@@ -530,8 +531,9 @@ def execute_phase1_analysis(
         else:
             content_str = ""
 
-        # Store report
+        # Store report and the context it was produced in (mode C1 votes right after it)
         phase1_reports[agent_id] = content_str
+        phase1_contexts[agent_id] = context_messages
         
         # Store metadata
         phase1_metadata[agent_id] = {
@@ -596,5 +598,6 @@ def execute_phase1_analysis(
     
     return {
         'reports': phase1_reports,
+        'contexts': phase1_contexts,
         'metadata': phase1_metadata
     }
